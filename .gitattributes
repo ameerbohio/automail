@@ -1,0 +1,19 @@
+# Normalize all text files to LF in the repo and on checkout.
+# Critical: this repo is developed on Windows but runs on Linux (WSL / Proxmox).
+# CRLF line endings break shell scripts (gen.sh) and Docker entrypoints on Linux.
+* text=auto eol=lf
+
+# Explicitly LF for files that must be LF on Linux
+*.sh   text eol=lf
+*.go   text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.sql  text eol=lf
+
+# Binary files — never normalize
+*.png binary
+*.jpg binary
+*.pdf binary
+*.pem binary
