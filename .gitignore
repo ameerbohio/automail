@@ -1,11 +1,15 @@
-# Secrets & certificates (never commit)
+# Secrets & certificates (never commit the generated material -- the
+# generator scripts under infra/certs/*.sh are tracked, the key/cert
+# output they produce is not)
 .env
 .env.*
 !.env.example
 *.pem
 *.key
-certs/
-infra/certs/
+*.srl
+infra/certs/*
+!infra/certs/*.sh
+!infra/certs/.gitkeep
 
 # Go
 bin/

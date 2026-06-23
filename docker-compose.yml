@@ -22,6 +22,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pg_data:/var/lib/postgresql/data
+      # Official postgres image runs every *.sql in this dir, once, on
+      # first init of an empty data volume -- the Phase 1 "migration
+      # runner" (see services/cloud/db/schema.sql header comment).
+      - ./services/cloud/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     networks:
       - automail
 
@@ -38,6 +42,10 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # SSE-S3 default encryption via a static single-key KMS (no external
+      # KES/Vault needed for the prototype) -- second encryption layer on
+      # top of the browser's E2EE, see docs/study/04-sse-s3-vs-e2ee.md.
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY}
     volumes:
       - minio_data:/data
     networks:
@@ -47,6 +55,17 @@ services:
     build: ./services/cloud
     environment:
       PORT: 8080
+      MTLS_PORT: 8443
+      MTLS_CA_CERT_PATH: /certs/ca-cert.pem
+      MTLS_CLOUD_CERT_PATH: /certs/cloud-server-cert.pem
+      MTLS_CLOUD_KEY_PATH: /certs/cloud-server-key.pem
+    volumes:
+      - ./infra/certs:/certs:ro
+    # 8443 published for local `curl --cert ... --key ... https://localhost:8443/internal/healthz`
+    # verification (Phase 1). Don't combine with `--scale cloud-server=2` --
+    # two replicas can't both bind the same host port.
+    ports:
+      - "8443:8443"
     networks:
       - automail
     labels:

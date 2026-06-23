@@ -1,0 +1,3 @@
+-- sqlc query definitions. Empty in Phase 1 -- the schema needs to exist
+-- before any query against it makes sense. Phase 2 (Cloud Server Core)
+-- adds the first real queries: recipient lookup and job insertion.
