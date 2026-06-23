@@ -1,0 +1,76 @@
+services:
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - automail
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - automail
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - automail
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      - automail
+
+  cloud-server:
+    build: ./services/cloud
+    environment:
+      PORT: 8080
+    networks:
+      - automail
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cloud-server.rule=Host(`api.automail.local`)"
+      - "traefik.http.routers.cloud-server.entrypoints=websecure"
+      - "traefik.http.routers.cloud-server.tls=true"
+      - "traefik.http.services.cloud-server.loadbalancer.server.port=8080"
+
+  portal:
+    build: ./services/portal
+    networks:
+      - automail
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portal.rule=Host(`automail.local`)"
+      - "traefik.http.routers.portal.entrypoints=websecure"
+      - "traefik.http.routers.portal.tls=true"
+      - "traefik.http.services.portal.loadbalancer.server.port=3000"
+
+networks:
+  automail:
+
+volumes:
+  pg_data:
+  redis_data:
+  minio_data:
