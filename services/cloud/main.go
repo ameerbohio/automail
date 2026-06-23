@@ -1,17 +1,66 @@
 package main
 
 import (
+	"context"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+
+	"automail/cloud/db"
+	"automail/cloud/handlers"
+	"automail/cloud/minioclient"
+
+	_ "github.com/lib/pq"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/redis/go-redis/v9"
 )
 
-func healthzHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+func loadRSAPrivateKey(path string) (*rsa.PrivateKey, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block in %s", path)
+	}
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	rsaKey, ok := key.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("%s is not an RSA private key", path)
+	}
+	return rsaKey, nil
+}
+
+func loadRSAPublicKey(path string) (*rsa.PublicKey, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block in %s", path)
+	}
+	key, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	rsaKey, ok := key.(*rsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("%s is not an RSA public key", path)
+	}
+	return rsaKey, nil
 }
 
 func internalHealthzHandler(w http.ResponseWriter, r *http.Request) {
@@ -22,7 +71,7 @@ func internalHealthzHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-// mTLS listener: stands in for the Phase 3 printer-link (/internal/printer-link)
+// startMTLSServer stands in for the Phase 3 printer-link (/internal/printer-link)
 // so Phase 1's certs can be verified end-to-end now. Phase 3 reuses this same
 // tls.Config when it upgrades /internal/printer-link to a WebSocket.
 func startMTLSServer(addr string) error {
@@ -52,14 +101,74 @@ func startMTLSServer(addr string) error {
 	return server.ListenAndServeTLS(os.Getenv("MTLS_CLOUD_CERT_PATH"), os.Getenv("MTLS_CLOUD_KEY_PATH"))
 }
 
+func mustEnv(key string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		log.Fatalf("required env var %s is not set", key)
+	}
+	return val
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
+	sqlDB, err := sql.Open("postgres", mustEnv("DATABASE_URL"))
+	if err != nil {
+		log.Fatalf("postgres open: %v", err)
+	}
+	defer sqlDB.Close()
+
+	redisOpts, err := redis.ParseURL(mustEnv("REDIS_URL"))
+	if err != nil {
+		log.Fatalf("redis URL: %v", err)
+	}
+	rdb := redis.NewClient(redisOpts)
+	defer rdb.Close()
+
+	minioClient, err := minio.New(mustEnv("MINIO_ENDPOINT"), &minio.Options{
+		Creds:  credentials.NewStaticV4(mustEnv("MINIO_ACCESS_KEY"), mustEnv("MINIO_SECRET_KEY"), ""),
+		Secure: os.Getenv("MINIO_SECURE") == "true",
+	})
+	if err != nil {
+		log.Fatalf("minio client: %v", err)
+	}
+	if err := minioclient.EnsureBucket(context.Background(), minioClient); err != nil {
+		log.Fatalf("minio bucket: %v", err)
+	}
+
+	jwtPriv, err := loadRSAPrivateKey(mustEnv("JWT_PRIVATE_KEY_PATH"))
+	if err != nil {
+		log.Fatalf("JWT private key: %v", err)
+	}
+	jwtPub, err := loadRSAPublicKey(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatalf("JWT public key: %v", err)
+	}
+
+	srv := &handlers.Server{
+		Queries: db.New(sqlDB),
+		SQLDB:   sqlDB,
+		Redis:   rdb,
+		Minio:   minioClient,
+		AppKey:  mustEnv("APP_ENCRYPTION_KEY"),
+		JWTPriv: jwtPriv,
+		JWTPub:  jwtPub,
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", healthzHandler)
+	mux.HandleFunc("GET /healthz", srv.Healthz)
+	mux.HandleFunc("GET /recipients", srv.SearchRecipients)
+	mux.HandleFunc("GET /recipients/{id}/public-key", srv.RecipientPublicKey)
+
+	mux.Handle("POST /jobs/upload-url", optionalAuth(jwtPub)(http.HandlerFunc(srv.UploadURL)))
+	mux.Handle("POST /jobs", optionalAuth(jwtPub)(http.HandlerFunc(srv.CreateJob)))
+
+	mux.HandleFunc("POST /auth/login", srv.Login)
+	mux.HandleFunc("POST /auth/refresh", srv.Refresh)
+	mux.Handle("POST /auth/logout", requireAuth(jwtPub)(http.HandlerFunc(srv.Logout)))
 
 	if mtlsPort := os.Getenv("MTLS_PORT"); mtlsPort != "" {
 		go func() {

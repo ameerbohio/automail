@@ -53,12 +53,25 @@ services:
 
   cloud-server:
     build: ./services/cloud
+    depends_on:
+      - postgres
+      - redis
+      - minio
     environment:
       PORT: 8080
       MTLS_PORT: 8443
       MTLS_CA_CERT_PATH: /certs/ca-cert.pem
       MTLS_CLOUD_CERT_PATH: /certs/cloud-server-cert.pem
       MTLS_CLOUD_KEY_PATH: /certs/cloud-server-key.pem
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_SECURE: "false"
+      JWT_PRIVATE_KEY_PATH: /certs/jwt-private.pem
+      JWT_PUBLIC_KEY_PATH: /certs/jwt-public.pem
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
     volumes:
       - ./infra/certs:/certs:ro
     # 8443 published for local `curl --cert ... --key ... https://localhost:8443/internal/healthz`
