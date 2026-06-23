@@ -1,0 +1,33 @@
+# Secrets & certificates (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+certs/
+infra/certs/
+
+# Go
+bin/
+*.test
+*.out
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-error.log*
+
+# Data volumes / local state
+*.log
+data/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# Claude local settings (machine-specific)
+.claude/settings.local.json
