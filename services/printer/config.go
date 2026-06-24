@@ -1,0 +1,64 @@
+package main
+
+import (
+	"log"
+	"os"
+	"strconv"
+	"time"
+)
+
+// config holds every environment variable the printer microservice reads
+// at startup (plans/04-printer-microservice.md "Configuration"). No
+// config file, no flags -- env vars are enough for a single-process
+// service with this few knobs.
+type config struct {
+	MailboxID         string
+	CloudServerWSURL  string
+	MTLSCACertPath    string
+	MTLSCertPath      string
+	MTLSKeyPath       string
+	HeartbeatInterval time.Duration
+	ReconnectMaxBack  time.Duration
+	DevMode           bool
+	ListenAddr        string
+	PrinterName       string
+}
+
+func mustEnv(key string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		log.Fatalf("required env var %s is not set", key)
+	}
+	return val
+}
+
+func envDurationSeconds(key string, def time.Duration) time.Duration {
+	val := os.Getenv(key)
+	if val == "" {
+		return def
+	}
+	secs, err := strconv.Atoi(val)
+	if err != nil {
+		log.Fatalf("env var %s must be an integer number of seconds, got %q", key, val)
+	}
+	return time.Duration(secs) * time.Second
+}
+
+func loadConfig() config {
+	listenAddr := os.Getenv("LISTEN_ADDR")
+	if listenAddr == "" {
+		listenAddr = ":8444"
+	}
+	return config{
+		MailboxID:         mustEnv("MAILBOX_ID"),
+		CloudServerWSURL:  mustEnv("CLOUD_SERVER_WS_URL"),
+		MTLSCACertPath:    mustEnv("MTLS_CA_CERT_PATH"),
+		MTLSCertPath:      mustEnv("MTLS_CERT_PATH"),
+		MTLSKeyPath:       mustEnv("MTLS_KEY_PATH"),
+		HeartbeatInterval: envDurationSeconds("HEARTBEAT_INTERVAL", 30*time.Second),
+		ReconnectMaxBack:  envDurationSeconds("RECONNECT_MAX_BACKOFF", 30*time.Second),
+		DevMode:           os.Getenv("DEV_MODE") == "true",
+		ListenAddr:        listenAddr,
+		PrinterName:       os.Getenv("PRINTER_NAME"), // unused until Phase 6's lp call
+	}
+}

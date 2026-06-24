@@ -268,3 +268,40 @@ func (q *Queries) SearchRecipients(ctx context.Context, arg SearchRecipientsPara
 	}
 	return items, nil
 }
+
+const updateJobStatus = `-- name: UpdateJobStatus :one
+UPDATE jobs
+SET status = $1,
+    delivered_at = CASE WHEN $1 = 'delivered' THEN now() ELSE delivered_at END
+WHERE id = $2
+RETURNING id, mailbox_id, blob_ref, status
+`
+
+type UpdateJobStatusParams struct {
+	Status string    `json:"status"`
+	ID     uuid.UUID `json:"id"`
+}
+
+type UpdateJobStatusRow struct {
+	ID        uuid.UUID `json:"id"`
+	MailboxID uuid.UUID `json:"mailbox_id"`
+	BlobRef   string    `json:"blob_ref"`
+	Status    string    `json:"status"`
+}
+
+// Applied from "status" printer-link frames (plans/05-cloud-server.md
+// "Status frames"). Phase 3 only ever writes 'delivered' (the dev-mode
+// stub dispatch always succeeds); 'printing' and 'failed' transitions
+// are exercised for real once Phase 4 implements actual dispatch retries.
+// delivered_at is set only on the 'delivered' transition.
+func (q *Queries) UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) (UpdateJobStatusRow, error) {
+	row := q.db.QueryRowContext(ctx, updateJobStatus, arg.Status, arg.ID)
+	var i UpdateJobStatusRow
+	err := row.Scan(
+		&i.ID,
+		&i.MailboxID,
+		&i.BlobRef,
+		&i.Status,
+	)
+	return i, err
+}
