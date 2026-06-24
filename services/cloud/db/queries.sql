@@ -78,3 +78,15 @@ UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1;
 
 -- name: RevokeRefreshTokenByHash :exec
 UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL;
+
+-- name: UpdateJobStatus :one
+-- Applied from "status" printer-link frames (plans/05-cloud-server.md
+-- "Status frames"). Phase 3 only ever writes 'delivered' (the dev-mode
+-- stub dispatch always succeeds); 'printing' and 'failed' transitions
+-- are exercised for real once Phase 4 implements actual dispatch retries.
+-- delivered_at is set only on the 'delivered' transition.
+UPDATE jobs
+SET status = sqlc.arg(status),
+    delivered_at = CASE WHEN sqlc.arg(status) = 'delivered' THEN now() ELSE delivered_at END
+WHERE id = sqlc.arg(id)
+RETURNING id, mailbox_id, blob_ref, status;

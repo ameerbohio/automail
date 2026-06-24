@@ -19,7 +19,8 @@ echo "==> Generating cloud-server certificate (signed by internal CA)"
 openssl req -newkey rsa:2048 -keyout cloud-server-key.pem -out cloud-server-csr.pem \
   -nodes -subj "/CN=cloud-server"
 openssl x509 -req -in cloud-server-csr.pem -CA ca-cert.pem -CAkey ca-key.pem \
-  -CAcreateserial -out cloud-server-cert.pem -days 365
+  -CAcreateserial -out cloud-server-cert.pem -days 365 \
+  -extfile <(printf "subjectAltName=DNS:cloud-server,DNS:localhost")
 rm -f cloud-server-csr.pem
 
 echo "==> Generating printer-service certificate (signed by internal CA)"

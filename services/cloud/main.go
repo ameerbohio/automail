@@ -15,6 +15,7 @@ import (
 
 	"automail/cloud/db"
 	"automail/cloud/handlers"
+	"automail/cloud/link"
 	"automail/cloud/minioclient"
 
 	_ "github.com/lib/pq"
@@ -71,10 +72,11 @@ func internalHealthzHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-// startMTLSServer stands in for the Phase 3 printer-link (/internal/printer-link)
-// so Phase 1's certs can be verified end-to-end now. Phase 3 reuses this same
-// tls.Config when it upgrades /internal/printer-link to a WebSocket.
-func startMTLSServer(addr string) error {
+// startMTLSServer is the internal listener every printer dials out to.
+// Phase 1 only proved certs verify end-to-end against /internal/healthz;
+// Phase 3 adds the real /internal/printer-link WebSocket upgrade onto the
+// same tls.Config and mux.
+func startMTLSServer(addr string, srv *handlers.Server) error {
 	caCert, err := os.ReadFile(os.Getenv("MTLS_CA_CERT_PATH"))
 	if err != nil {
 		return err
@@ -91,6 +93,7 @@ func startMTLSServer(addr string) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/internal/healthz", internalHealthzHandler)
+	mux.HandleFunc("GET /internal/printer-link", srv.PrinterLink)
 
 	server := &http.Server{
 		Addr:      addr,
@@ -148,14 +151,16 @@ func main() {
 		log.Fatalf("JWT public key: %v", err)
 	}
 
+	queries := db.New(sqlDB)
 	srv := &handlers.Server{
-		Queries: db.New(sqlDB),
+		Queries: queries,
 		SQLDB:   sqlDB,
 		Redis:   rdb,
 		Minio:   minioClient,
 		AppKey:  mustEnv("APP_ENCRYPTION_KEY"),
 		JWTPriv: jwtPriv,
 		JWTPub:  jwtPub,
+		Hub:     link.NewHub(rdb, queries),
 	}
 
 	mux := http.NewServeMux()
@@ -172,7 +177,7 @@ func main() {
 
 	if mtlsPort := os.Getenv("MTLS_PORT"); mtlsPort != "" {
 		go func() {
-			if err := startMTLSServer(":" + mtlsPort); err != nil {
+			if err := startMTLSServer(":"+mtlsPort, srv); err != nil {
 				log.Fatal(err)
 			}
 		}()

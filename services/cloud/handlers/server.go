@@ -9,6 +9,7 @@ import (
 	"database/sql"
 
 	"automail/cloud/db"
+	"automail/cloud/link"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/redis/go-redis/v9"
@@ -26,4 +27,6 @@ type Server struct {
 
 	JWTPriv *rsa.PrivateKey
 	JWTPub  *rsa.PublicKey
+
+	Hub *link.Hub // printer-link connection registry + dispatch routing (Phase 3)
 }

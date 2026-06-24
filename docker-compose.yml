@@ -88,6 +88,30 @@ services:
       - "traefik.http.routers.cloud-server.tls=true"
       - "traefik.http.services.cloud-server.loadbalancer.server.port=8080"
 
+  printer:
+    build: ./services/printer
+    depends_on:
+      - cloud-server
+    environment:
+      MAILBOX_ID: ${DEV_MAILBOX_ID:-00000000-0000-0000-0000-000000000001}
+      CLOUD_SERVER_WS_URL: wss://cloud-server:8443/internal/printer-link
+      MTLS_CA_CERT_PATH: /certs/ca-cert.pem
+      MTLS_CERT_PATH: /certs/printer-cert.pem
+      MTLS_KEY_PATH: /certs/printer-key.pem
+      HEARTBEAT_INTERVAL: "30"
+      RECONNECT_MAX_BACKOFF: "30"
+      DEV_MODE: "true"
+      LISTEN_ADDR: ":8444"
+    volumes:
+      - ./infra/certs:/certs:ro
+    networks:
+      - automail
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8444/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   portal:
     build: ./services/portal
     networks:
