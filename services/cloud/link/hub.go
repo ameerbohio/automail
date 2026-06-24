@@ -58,19 +58,31 @@ func (h *Hub) Accept(ctx context.Context, w http.ResponseWriter, r *http.Request
 	h.Registry.Add(reg.MailboxID, conn)
 	defer h.Registry.Remove(reg.MailboxID, conn)
 
-	if err := store.SetPrinterState(ctx, h.Redis, reg.MailboxID, registerToState(reg)); err != nil {
-		log.Printf("printer-link: mailbox %s: seed state cache: %v", reg.MailboxID, err)
-	}
-
 	// The owner node (this one) subscribes so any node's tryDispatch can
 	// route a job to this socket via PUBLISH -- see "Why publish instead
 	// of call" in plans/05-cloud-server.md. pumpDispatch exits on its own
 	// once ctx is cancelled (read loop below returns -> caller cancels).
+	//
+	// This must happen, and be acked, before the state cache is seeded
+	// below: Subscribe() only writes the SUBSCRIBE command, it doesn't wait
+	// for the server's reply, so without the Receive a tryDispatch PUBLISH
+	// landing right after register could see zero subscribers and wrongly
+	// requeue the job. Seeding state only after the ack gives callers a
+	// reliable signal to poll on: once mailbox:<id>:state is visible, the
+	// dispatch subscription is guaranteed already active.
 	pumpCtx, cancelPump := context.WithCancel(ctx)
 	defer cancelPump()
 	sub := h.Redis.Subscribe(pumpCtx, "mailbox:"+reg.MailboxID+":dispatch")
 	defer sub.Close()
+	if _, err := sub.Receive(ctx); err != nil {
+		log.Printf("printer-link: mailbox %s: dispatch subscribe ack: %v", reg.MailboxID, err)
+		return err
+	}
 	go h.pumpDispatch(pumpCtx, conn, sub)
+
+	if err := store.SetPrinterState(ctx, h.Redis, reg.MailboxID, registerToState(reg)); err != nil {
+		log.Printf("printer-link: mailbox %s: seed state cache: %v", reg.MailboxID, err)
+	}
 
 	return h.readLoop(ctx, conn, reg.MailboxID)
 }
