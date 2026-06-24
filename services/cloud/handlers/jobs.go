@@ -12,6 +12,7 @@ import (
 
 	"automail/cloud/authctx"
 	"automail/cloud/db"
+	"automail/cloud/dispatch"
 	"automail/cloud/minioclient"
 
 	"github.com/google/uuid"
@@ -82,8 +83,10 @@ func newGuestToken() (raw string, hash string, err error) {
 
 // CreateJob handles POST /jobs. Auth optional: a Bearer token sets
 // sender_id; otherwise the job is a guest submission with a one-time
-// guest_token (plans/09-api-contracts.md). Phase 2 skips dispatch --
-// every job is inserted directly as 'queued' (see db/queries.sql).
+// guest_token (plans/09-api-contracts.md). Every job is inserted as
+// 'submitted', then dispatch.TryDispatch attempts immediate dispatch --
+// the response status is "dispatching" or "queued" depending on the
+// outcome (plans/05-cloud-server.md "Dispatch Logic").
 //
 // Zero-knowledge invariant: encrypted_key is decoded from base64 and
 // passed straight to Postgres as opaque bytes. It is never decrypted,
@@ -167,9 +170,23 @@ func (s *Server) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Attempt immediate dispatch (plans/05-cloud-server.md "Immediate
+	// Dispatch"). A dispatch-layer error (Redis/Postgres unreachable, not
+	// a normal "blocked" outcome -- that returns status "queued", not an
+	// error) surfaces as a 500: the job row exists as 'submitted', so it
+	// isn't lost, but nothing has queued it onto jobs:pending yet either,
+	// so the sender needs to know the submission didn't fully land rather
+	// than silently trusting a queued state that was never actually set up.
+	ref := dispatch.FromJob(job.ID, resolved.MailboxID, resolved.SlotID, encryptedKey, req.BlobRef)
+	status, err := dispatch.TryDispatch(r.Context(), s.Dispatcher, ref)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "could not dispatch job", "INTERNAL")
+		return
+	}
+
 	WriteJSON(w, http.StatusAccepted, createJobResponse{
 		JobID:      job.ID.String(),
-		Status:     job.Status,
+		Status:     status,
 		GuestToken: guestToken,
 	})
 }

@@ -9,6 +9,7 @@ import (
 	"database/sql"
 
 	"automail/cloud/db"
+	"automail/cloud/dispatch"
 	"automail/cloud/link"
 
 	"github.com/minio/minio-go/v7"
@@ -28,5 +29,6 @@ type Server struct {
 	JWTPriv *rsa.PrivateKey
 	JWTPub  *rsa.PublicKey
 
-	Hub *link.Hub // printer-link connection registry + dispatch routing (Phase 3)
+	Hub        *link.Hub     // printer-link connection registry + dispatch routing (Phase 3)
+	Dispatcher dispatch.Deps // immediate-dispatch dependencies, used by CreateJob (Phase 4)
 }

@@ -101,9 +101,9 @@ func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventPara
 const insertJob = `-- name: InsertJob :one
 INSERT INTO jobs (
   sender_id, guest_token_hash, mailbox_id, slot_id,
-  encrypted_key, blob_ref, page_count, status
+  encrypted_key, blob_ref, page_count
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, 'queued'
+  $1, $2, $3, $4, $5, $6, $7
 )
 RETURNING id, status
 `
@@ -123,9 +123,10 @@ type InsertJobRow struct {
 	Status string    `json:"status"`
 }
 
-// Phase 2 skips dispatch logic entirely -- every job lands directly in
-// 'queued' rather than the schema default 'submitted'. Real dispatch
-// attempts (submitted -> dispatching | queued) arrive in Phase 4.
+// Every job starts 'submitted' (the schema default). Phase 4's
+// tryDispatch runs immediately after insert and moves it to
+// 'dispatching' (immediate dispatch) or 'queued' (blocked, added to the
+// jobs:pending Redis Stream) -- see CreateJob in handlers/jobs.go.
 func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (InsertJobRow, error) {
 	row := q.db.QueryRowContext(ctx, insertJob,
 		arg.SenderID,
@@ -154,6 +155,66 @@ type InsertRefreshTokenParams struct {
 
 func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error {
 	_, err := q.db.ExecContext(ctx, insertRefreshToken, arg.SenderID, arg.TokenHash, arg.ExpiresAt)
+	return err
+}
+
+const lockJobForDispatch = `-- name: LockJobForDispatch :one
+SELECT id, mailbox_id, slot_id, encrypted_key, blob_ref, status
+FROM jobs
+WHERE id = $1 AND status IN ('submitted', 'queued')
+FOR UPDATE NOWAIT
+`
+
+type LockJobForDispatchRow struct {
+	ID           uuid.UUID `json:"id"`
+	MailboxID    uuid.UUID `json:"mailbox_id"`
+	SlotID       uuid.UUID `json:"slot_id"`
+	EncryptedKey []byte    `json:"encrypted_key"`
+	BlobRef      string    `json:"blob_ref"`
+	Status       string    `json:"status"`
+}
+
+// Phase 4 double-dispatch guard (plans/03-scaling.md "Dispatch Eligibility
+// Check"). Must run inside a transaction alongside MarkJobDispatching --
+// NOWAIT means a second node racing for the same row gets an immediate
+// 55P03 lock_not_available error instead of blocking, so it can fall
+// through to "someone else has this" and move on to the next job rather
+// than stall a connection. Only 'submitted' or 'queued' rows are
+// claimable: 'dispatching'/'printing'/'delivered'/'failed' are already
+// spoken for or terminal.
+func (q *Queries) LockJobForDispatch(ctx context.Context, id uuid.UUID) (LockJobForDispatchRow, error) {
+	row := q.db.QueryRowContext(ctx, lockJobForDispatch, id)
+	var i LockJobForDispatchRow
+	err := row.Scan(
+		&i.ID,
+		&i.MailboxID,
+		&i.SlotID,
+		&i.EncryptedKey,
+		&i.BlobRef,
+		&i.Status,
+	)
+	return i, err
+}
+
+const markJobDispatching = `-- name: MarkJobDispatching :exec
+UPDATE jobs SET status = 'dispatching' WHERE id = $1
+`
+
+// Second half of the claim transaction started by LockJobForDispatch.
+func (q *Queries) MarkJobDispatching(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, markJobDispatching, id)
+	return err
+}
+
+const requeueJob = `-- name: RequeueJob :exec
+UPDATE jobs SET status = 'queued' WHERE id = $1
+`
+
+// Reverts a claimed job back to 'queued' when the publish to
+// mailbox:<id>:dispatch finds zero subscribers (printer link not held by
+// any live node -- plans/05-cloud-server.md "Presence and liveness").
+func (q *Queries) RequeueJob(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, requeueJob, id)
 	return err
 }
 
