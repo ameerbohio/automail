@@ -83,6 +83,8 @@ func handleDispatch(ctx context.Context, frame Frame, devMode bool, send func(Fr
 		// real plaintext (Phase 6), is not allowed to be skipped or
 		// deferred, so a failure here is logged loudly even in dev mode.
 		log.Printf("job %s: dev: failed to remove stub file %s: %v", frame.JobID, path, err)
+	} else {
+		log.Printf("job %s: dev: deleted %s", frame.JobID, path)
 	}
 
 	send(Frame{Type: "status", JobID: frame.JobID, Status: "delivered"})

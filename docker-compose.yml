@@ -4,13 +4,17 @@ services:
     command:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.websecure.http.tls.options=default@file"
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/traefik:/etc/traefik/dynamic:ro
     networks:
       - automail
 
@@ -74,19 +78,31 @@ services:
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
     volumes:
       - ./infra/certs:/certs:ro
-    # 8443 published for local `curl --cert ... --key ... https://localhost:8443/internal/healthz`
-    # verification (Phase 1). Don't combine with `--scale cloud-server=2` --
-    # two replicas can't both bind the same host port.
-    ports:
-      - "8443:8443"
+    # No host port for 8443: verify mTLS from inside the network instead, e.g.
+    #   docker compose exec cloud-server curl --cert /certs/printer-cert.pem \
+    #     --key /certs/printer-key.pem --cacert /certs/ca-cert.pem \
+    #     https://localhost:8443/internal/healthz
+    # Keeps `--scale cloud-server=2` (Phase 0 verify) working, since no two
+    # replicas need to share a host port.
     networks:
       - automail
     labels:
       - "traefik.enable=true"
+      - "traefik.http.services.cloud-server.loadbalancer.server.port=8080"
+      # Unauthenticated, abuse-prone endpoints (guest job submission, recipient
+      # search) get rate-limited; the more specific rule wins over the
+      # catch-all router below without needing an explicit priority.
+      - "traefik.http.routers.cloud-server-guest.rule=Host(`api.automail.local`) && (PathPrefix(`/jobs`) || PathPrefix(`/recipients`))"
+      - "traefik.http.routers.cloud-server-guest.entrypoints=websecure"
+      - "traefik.http.routers.cloud-server-guest.tls=true"
+      - "traefik.http.routers.cloud-server-guest.tls.options=default@file"
+      - "traefik.http.routers.cloud-server-guest.service=cloud-server"
+      - "traefik.http.routers.cloud-server-guest.middlewares=secure-headers@file,guest-ratelimit@file"
       - "traefik.http.routers.cloud-server.rule=Host(`api.automail.local`)"
       - "traefik.http.routers.cloud-server.entrypoints=websecure"
       - "traefik.http.routers.cloud-server.tls=true"
-      - "traefik.http.services.cloud-server.loadbalancer.server.port=8080"
+      - "traefik.http.routers.cloud-server.tls.options=default@file"
+      - "traefik.http.routers.cloud-server.middlewares=secure-headers@file"
 
   printer:
     build: ./services/printer
@@ -121,6 +137,8 @@ services:
       - "traefik.http.routers.portal.rule=Host(`automail.local`)"
       - "traefik.http.routers.portal.entrypoints=websecure"
       - "traefik.http.routers.portal.tls=true"
+      - "traefik.http.routers.portal.tls.options=default@file"
+      - "traefik.http.routers.portal.middlewares=secure-headers@file"
       - "traefik.http.services.portal.loadbalancer.server.port=3000"
 
 networks:

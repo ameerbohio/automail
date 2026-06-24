@@ -39,7 +39,7 @@ func maskName(full string) string {
 func (s *Server) SearchRecipients(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if len(q) < 2 {
-		writeError(w, http.StatusBadRequest, "q must be at least 2 characters", "INVALID_QUERY")
+		WriteError(w, http.StatusBadRequest, "q must be at least 2 characters", "INVALID_QUERY")
 		return
 	}
 
@@ -48,7 +48,7 @@ func (s *Server) SearchRecipients(w http.ResponseWriter, r *http.Request) {
 		Query:  q,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "search failed", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "search failed", "INTERNAL")
 		return
 	}
 
@@ -60,7 +60,7 @@ func (s *Server) SearchRecipients(w http.ResponseWriter, r *http.Request) {
 			BuildingAddress: row.BuildingAddress,
 		})
 	}
-	writeJSON(w, http.StatusOK, results)
+	WriteJSON(w, http.StatusOK, results)
 }
 
 type publicKeyResponse struct {
@@ -75,21 +75,21 @@ func (s *Server) RecipientPublicKey(w http.ResponseWriter, r *http.Request) {
 	idParam := r.PathValue("id")
 	recipientID, err := uuid.Parse(idParam)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "recipient not found", "RECIPIENT_NOT_FOUND")
+		WriteError(w, http.StatusNotFound, "recipient not found", "RECIPIENT_NOT_FOUND")
 		return
 	}
 
 	resolved, err := s.Queries.ResolveRecipient(r.Context(), recipientID)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeError(w, http.StatusNotFound, "recipient not found or slot unassigned", "RECIPIENT_NOT_FOUND")
+		WriteError(w, http.StatusNotFound, "recipient not found or slot unassigned", "RECIPIENT_NOT_FOUND")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "lookup failed", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "lookup failed", "INTERNAL")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, publicKeyResponse{
+	WriteJSON(w, http.StatusOK, publicKeyResponse{
 		RecipientID:  resolved.RecipientID.String(),
 		PublicKeyPem: resolved.PublicKeyPem,
 	})

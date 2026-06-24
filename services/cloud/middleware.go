@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"automail/cloud/authctx"
+	"automail/cloud/handlers"
 	"automail/cloud/jwtutil"
 )
 
@@ -37,12 +38,12 @@ func requireAuth(pubKey *rsa.PublicKey) func(http.Handler) http.Handler {
 			authz := r.Header.Get("Authorization")
 			after, ok := strings.CutPrefix(authz, "Bearer ")
 			if !ok {
-				writeError(w, http.StatusUnauthorized, "missing bearer token", "UNAUTHORIZED")
+				handlers.WriteError(w, http.StatusUnauthorized, "missing bearer token", "UNAUTHORIZED")
 				return
 			}
 			claims, err := jwtutil.ParseAccessToken(pubKey, after)
 			if err != nil {
-				writeError(w, http.StatusUnauthorized, "invalid or expired token", "UNAUTHORIZED")
+				handlers.WriteError(w, http.StatusUnauthorized, "invalid or expired token", "UNAUTHORIZED")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(authctx.WithSender(r.Context(), claims.Subject, claims.Role)))

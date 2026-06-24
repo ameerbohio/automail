@@ -66,9 +66,11 @@ func registerToState(reg Frame) store.PrinterState {
 }
 
 // statusPayload is what gets published to job:<id>:status for the SSE
-// relay (Phase 5). Deliberately narrower than the full link.Frame -- a
-// sender's browser has no business seeing job_id/type framing details
-// that only make sense on the printer-link wire.
+// relay (Phase 5). Deliberately narrower than the full link.Frame -- the
+// channel name already scopes the job, so job_id would be redundant here.
+// Phase 5's stream handler is responsible for adding job_id back in when it
+// relays this payload to the client, to match the wire format documented in
+// plans/09-api-contracts.md ("GET /jobs/:id/stream").
 type statusPayload struct {
 	Status string `json:"status"`
 	Error  string `json:"error,omitempty"`

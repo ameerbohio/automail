@@ -167,7 +167,7 @@ A closed socket (read error) removes the connection from the registry; the `mail
 ```go
 // Update job status in Postgres; write audit event
 // Publish to Redis pub/sub for SSE relay
-rdb.Publish(ctx, "job:"+jobID+":status", json({ status }))
+rdb.Publish(ctx, "job:"+jobID+":status", json({ status })) // job_id omitted: the channel name already scopes it
 
 // On "delivered": request MinIO blob deletion
 if frame.Status == "delivered" {

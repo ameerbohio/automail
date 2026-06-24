@@ -151,6 +151,8 @@ Possible `status` values in order: `queued` → `dispatching` → `printing` →
 
 Connection closes when status reaches `delivered` or `failed`.
 
+Note for the Phase 5 implementer: the internal `job:<id>:status` Redis pub/sub payload (written by the printer-link hub, see `link.statusPayload`) deliberately omits `job_id` — the channel name already scopes it. The stream handler already knows `job_id` from the URL path, so it must add the field back in when forming the SSE `data:` line above.
+
 ---
 
 ### `GET /admin/jobs`

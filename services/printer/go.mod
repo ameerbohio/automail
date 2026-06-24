@@ -1,5 +1,5 @@
 module automail/printer
 
-go 1.22
+go 1.25.0
 
 require nhooyr.io/websocket v1.8.17
