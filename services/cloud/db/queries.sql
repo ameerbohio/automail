@@ -38,14 +38,15 @@ JOIN mailboxes ON mailboxes.id = mailbox_slots.mailbox_id
 WHERE residents.id = $1;
 
 -- name: InsertJob :one
--- Phase 2 skips dispatch logic entirely -- every job lands directly in
--- 'queued' rather than the schema default 'submitted'. Real dispatch
--- attempts (submitted -> dispatching | queued) arrive in Phase 4.
+-- Every job starts 'submitted' (the schema default). Phase 4's
+-- tryDispatch runs immediately after insert and moves it to
+-- 'dispatching' (immediate dispatch) or 'queued' (blocked, added to the
+-- jobs:pending Redis Stream) -- see CreateJob in handlers/jobs.go.
 INSERT INTO jobs (
   sender_id, guest_token_hash, mailbox_id, slot_id,
-  encrypted_key, blob_ref, page_count, status
+  encrypted_key, blob_ref, page_count
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, 'queued'
+  $1, $2, $3, $4, $5, $6, $7
 )
 RETURNING id, status;
 
@@ -75,6 +76,30 @@ WHERE token_hash = $1 AND revoked_at IS NULL;
 
 -- name: RevokeRefreshTokenByHash :exec
 UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL;
+
+-- name: LockJobForDispatch :one
+-- Phase 4 double-dispatch guard (plans/03-scaling.md "Dispatch Eligibility
+-- Check"). Must run inside a transaction alongside MarkJobDispatching --
+-- NOWAIT means a second node racing for the same row gets an immediate
+-- 55P03 lock_not_available error instead of blocking, so it can fall
+-- through to "someone else has this" and move on to the next job rather
+-- than stall a connection. Only 'submitted' or 'queued' rows are
+-- claimable: 'dispatching'/'printing'/'delivered'/'failed' are already
+-- spoken for or terminal.
+SELECT id, mailbox_id, slot_id, encrypted_key, blob_ref, status
+FROM jobs
+WHERE id = sqlc.arg(id) AND status IN ('submitted', 'queued')
+FOR UPDATE NOWAIT;
+
+-- name: MarkJobDispatching :exec
+-- Second half of the claim transaction started by LockJobForDispatch.
+UPDATE jobs SET status = 'dispatching' WHERE id = sqlc.arg(id);
+
+-- name: RequeueJob :exec
+-- Reverts a claimed job back to 'queued' when the publish to
+-- mailbox:<id>:dispatch finds zero subscribers (printer link not held by
+-- any live node -- plans/05-cloud-server.md "Presence and liveness").
+UPDATE jobs SET status = 'queued' WHERE id = sqlc.arg(id);
 
 -- name: UpdateJobStatus :one
 -- Applied from "status" printer-link frames (plans/05-cloud-server.md

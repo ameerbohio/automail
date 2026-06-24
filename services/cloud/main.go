@@ -14,10 +14,12 @@ import (
 	"os"
 
 	"automail/cloud/db"
+	"automail/cloud/dispatch"
 	"automail/cloud/handlers"
 	"automail/cloud/link"
 	"automail/cloud/minioclient"
 
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -152,16 +154,41 @@ func main() {
 	}
 
 	queries := db.New(sqlDB)
-	srv := &handlers.Server{
-		Queries: queries,
+	dispatchDeps := dispatch.Deps{
 		SQLDB:   sqlDB,
+		Queries: queries,
 		Redis:   rdb,
 		Minio:   minioClient,
-		AppKey:  mustEnv("APP_ENCRYPTION_KEY"),
-		JWTPriv: jwtPriv,
-		JWTPub:  jwtPub,
-		Hub:     link.NewHub(rdb, queries),
 	}
+	srv := &handlers.Server{
+		Queries:    queries,
+		SQLDB:      sqlDB,
+		Redis:      rdb,
+		Minio:      minioClient,
+		AppKey:     mustEnv("APP_ENCRYPTION_KEY"),
+		JWTPriv:    jwtPriv,
+		JWTPub:     jwtPub,
+		Hub:        link.NewHub(rdb, queries),
+		Dispatcher: dispatchDeps,
+	}
+
+	// nodeID identifies this process as a Redis Streams consumer
+	// (plans/05-cloud-server.md NODE_ID env var) -- defaults to the
+	// container hostname, which Docker Compose already makes unique per
+	// replica under --scale.
+	nodeID := os.Getenv("NODE_ID")
+	if nodeID == "" {
+		if hostname, err := os.Hostname(); err == nil {
+			nodeID = hostname
+		} else {
+			nodeID = uuid.New().String()
+		}
+	}
+	dispatcher := &dispatch.Dispatcher{Deps: dispatchDeps, NodeID: nodeID}
+	if err := dispatcher.EnsureGroup(context.Background()); err != nil {
+		log.Fatalf("dispatch: create consumer group: %v", err)
+	}
+	go dispatcher.Run(context.Background())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", srv.Healthz)
