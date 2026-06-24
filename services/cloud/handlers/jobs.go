@@ -34,18 +34,18 @@ type uploadURLResponse struct {
 func (s *Server) UploadURL(w http.ResponseWriter, r *http.Request) {
 	var req uploadURLRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body", "INVALID_BODY")
+		WriteError(w, http.StatusBadRequest, "invalid request body", "INVALID_BODY")
 		return
 	}
 
 	const ttl = 15 * time.Minute
 	uploadURL, blobRef, err := minioclient.PresignedUploadURL(r.Context(), s.Minio, ttl)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not generate upload URL", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "could not generate upload URL", "INTERNAL")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, uploadURLResponse{
+	WriteJSON(w, http.StatusOK, uploadURLResponse{
 		UploadURL: uploadURL,
 		BlobRef:   blobRef,
 		ExpiresIn: int(ttl.Seconds()),
@@ -91,39 +91,39 @@ func newGuestToken() (raw string, hash string, err error) {
 func (s *Server) CreateJob(w http.ResponseWriter, r *http.Request) {
 	var req createJobRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body", "INVALID_BODY")
+		WriteError(w, http.StatusBadRequest, "invalid request body", "INVALID_BODY")
 		return
 	}
 
 	recipientID, err := uuid.Parse(req.RecipientID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "recipient not found", "RECIPIENT_NOT_FOUND")
+		WriteError(w, http.StatusBadRequest, "recipient not found", "RECIPIENT_NOT_FOUND")
 		return
 	}
 
 	resolved, err := s.Queries.ResolveRecipient(r.Context(), recipientID)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeError(w, http.StatusBadRequest, "recipient not found or slot unassigned", "RECIPIENT_NOT_FOUND")
+		WriteError(w, http.StatusBadRequest, "recipient not found or slot unassigned", "RECIPIENT_NOT_FOUND")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "lookup failed", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "lookup failed", "INTERNAL")
 		return
 	}
 
 	exists, err := minioclient.BlobExists(r.Context(), s.Minio, req.BlobRef)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "blob check failed", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "blob check failed", "INTERNAL")
 		return
 	}
 	if !exists {
-		writeError(w, http.StatusUnprocessableEntity, "blob_ref not found", "INVALID_BLOB_REF")
+		WriteError(w, http.StatusUnprocessableEntity, "blob_ref not found", "INVALID_BLOB_REF")
 		return
 	}
 
 	encryptedKey, err := base64.StdEncoding.DecodeString(req.EncryptedKey)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "encrypted_key must be base64", "INVALID_BODY")
+		WriteError(w, http.StatusBadRequest, "encrypted_key must be base64", "INVALID_BODY")
 		return
 	}
 
@@ -141,7 +141,7 @@ func (s *Server) CreateJob(w http.ResponseWriter, r *http.Request) {
 	} else {
 		raw, hash, err := newGuestToken()
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not generate guest token", "INTERNAL")
+			WriteError(w, http.StatusInternalServerError, "could not generate guest token", "INTERNAL")
 			return
 		}
 		guestToken = raw
@@ -150,7 +150,7 @@ func (s *Server) CreateJob(w http.ResponseWriter, r *http.Request) {
 
 	job, err := s.Queries.InsertJob(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create job", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "could not create job", "INTERNAL")
 		return
 	}
 
@@ -163,11 +163,11 @@ func (s *Server) CreateJob(w http.ResponseWriter, r *http.Request) {
 		Action:  "job_submitted",
 		ActorID: actorID,
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not write audit event", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "could not write audit event", "INTERNAL")
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, createJobResponse{
+	WriteJSON(w, http.StatusAccepted, createJobResponse{
 		JobID:      job.ID.String(),
 		Status:     job.Status,
 		GuestToken: guestToken,

@@ -57,7 +57,7 @@ type tokenResponse struct {
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body", "INVALID_BODY")
+		WriteError(w, http.StatusBadRequest, "invalid request body", "INVALID_BODY")
 		return
 	}
 
@@ -66,28 +66,28 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		Email:  req.Email,
 	})
 	if errors.Is(err, sql.ErrNoRows) {
-		writeError(w, http.StatusUnauthorized, "invalid credentials", "UNAUTHORIZED")
+		WriteError(w, http.StatusUnauthorized, "invalid credentials", "UNAUTHORIZED")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "login failed", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "login failed", "INTERNAL")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(sender.PasswordHash), []byte(req.Password)); err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid credentials", "UNAUTHORIZED")
+		WriteError(w, http.StatusUnauthorized, "invalid credentials", "UNAUTHORIZED")
 		return
 	}
 
 	access, err := jwtutil.IssueAccessToken(s.JWTPriv, sender.ID, sender.Role)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not issue token", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "could not issue token", "INTERNAL")
 		return
 	}
 
 	rawRefresh, refreshHash, err := newRefreshToken()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not issue refresh token", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "could not issue refresh token", "INTERNAL")
 		return
 	}
 	expiresAt := time.Now().Add(refreshTokenTTL)
@@ -96,12 +96,12 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		TokenHash: refreshHash,
 		ExpiresAt: expiresAt,
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not store refresh token", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "could not store refresh token", "INTERNAL")
 		return
 	}
 
 	setRefreshCookie(w, rawRefresh, expiresAt)
-	writeJSON(w, http.StatusOK, tokenResponse{
+	WriteJSON(w, http.StatusOK, tokenResponse{
 		AccessToken: access,
 		ExpiresIn:   int(jwtutil.AccessTokenTTL.Seconds()),
 	})
@@ -113,7 +113,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("refresh_token")
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "missing refresh token", "UNAUTHORIZED")
+		WriteError(w, http.StatusUnauthorized, "missing refresh token", "UNAUTHORIZED")
 		return
 	}
 	sum := sha256.Sum256([]byte(cookie.Value))
@@ -121,34 +121,34 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	active, err := s.Queries.GetActiveRefreshToken(r.Context(), hash)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && active.ExpiresAt.Before(time.Now())) {
-		writeError(w, http.StatusUnauthorized, "expired or revoked token", "UNAUTHORIZED")
+		WriteError(w, http.StatusUnauthorized, "expired or revoked token", "UNAUTHORIZED")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "refresh failed", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "refresh failed", "INTERNAL")
 		return
 	}
 
 	if err := s.Queries.RevokeRefreshTokenByHash(r.Context(), hash); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not revoke token", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "could not revoke token", "INTERNAL")
 		return
 	}
 
 	sender, err := s.Queries.GetSenderByID(r.Context(), active.SenderID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "lookup failed", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "lookup failed", "INTERNAL")
 		return
 	}
 
 	access, err := jwtutil.IssueAccessToken(s.JWTPriv, sender.ID, sender.Role)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not issue token", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "could not issue token", "INTERNAL")
 		return
 	}
 
 	rawRefresh, refreshHash, err := newRefreshToken()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not issue refresh token", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "could not issue refresh token", "INTERNAL")
 		return
 	}
 	expiresAt := time.Now().Add(refreshTokenTTL)
@@ -157,12 +157,12 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 		TokenHash: refreshHash,
 		ExpiresAt: expiresAt,
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not store refresh token", "INTERNAL")
+		WriteError(w, http.StatusInternalServerError, "could not store refresh token", "INTERNAL")
 		return
 	}
 
 	setRefreshCookie(w, rawRefresh, expiresAt)
-	writeJSON(w, http.StatusOK, tokenResponse{
+	WriteJSON(w, http.StatusOK, tokenResponse{
 		AccessToken: access,
 		ExpiresIn:   int(jwtutil.AccessTokenTTL.Seconds()),
 	})

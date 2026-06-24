@@ -73,9 +73,6 @@ SELECT id, sender_id, expires_at
 FROM refresh_tokens
 WHERE token_hash = $1 AND revoked_at IS NULL;
 
--- name: RevokeRefreshToken :exec
-UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1;
-
 -- name: RevokeRefreshTokenByHash :exec
 UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL;
 

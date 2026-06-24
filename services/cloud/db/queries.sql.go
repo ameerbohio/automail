@@ -191,15 +191,6 @@ func (q *Queries) ResolveRecipient(ctx context.Context, id uuid.UUID) (ResolveRe
 	return i, err
 }
 
-const revokeRefreshToken = `-- name: RevokeRefreshToken :exec
-UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1
-`
-
-func (q *Queries) RevokeRefreshToken(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, revokeRefreshToken, id)
-	return err
-}
-
 const revokeRefreshTokenByHash = `-- name: RevokeRefreshTokenByHash :exec
 UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL
 `

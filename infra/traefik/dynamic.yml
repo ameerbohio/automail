@@ -1,0 +1,22 @@
+tls:
+  options:
+    default:
+      minVersion: VersionTLS13
+      sniStrict: true
+
+http:
+  middlewares:
+    secure-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        contentSecurityPolicy: "default-src 'self'"
+        frameDeny: true
+        contentTypeNosniff: true
+        referrerPolicy: "no-referrer"
+    # plans/02-security.md §6: 20 req/min per IP on upload + job submission endpoints.
+    guest-ratelimit:
+      rateLimit:
+        average: 20
+        period: 1m

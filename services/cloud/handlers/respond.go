@@ -12,13 +12,15 @@ type errorBody struct {
 	Code  string `json:"code"`
 }
 
-func writeError(w http.ResponseWriter, status int, message, code string) {
+// WriteError and WriteJSON are exported so package main (middleware.go)
+// can share this one implementation instead of keeping its own copy.
+func WriteError(w http.ResponseWriter, status int, message, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(errorBody{Error: message, Code: code})
 }
 
-func writeJSON(w http.ResponseWriter, status int, body interface{}) {
+func WriteJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(body)
