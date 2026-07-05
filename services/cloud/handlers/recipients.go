@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"automail/cloud/db"
 
@@ -30,8 +31,8 @@ func maskName(full string) string {
 	}
 	first := parts[0]
 	last := parts[len(parts)-1]
-	initial := first[:1]
-	return initial + ". " + last
+	_, size := utf8.DecodeRuneInString(first)
+	return first[:size] + ". " + last
 }
 
 // SearchRecipients handles GET /recipients?q=<name or address>. No auth --

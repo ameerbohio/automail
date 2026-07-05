@@ -101,7 +101,12 @@ func (di *Dispatcher) drain(ctx context.Context) {
 			Consumer: di.NodeID,
 			Streams:  []string{PendingStream, ">"},
 			Count:    10,
-			Block:    0, // non-blocking poll -- Run's select loop decides when to call drain
+			// Negative Block omits BLOCK entirely (non-blocking poll) --
+			// Run's select loop decides when to call drain. Block: 0 would
+			// send BLOCK 0 ("wait forever"), pinning this goroutine inside
+			// XREADGROUP so the available-event and sweep cases in Run never
+			// fire again.
+			Block: -1,
 		}).Result()
 		if err != nil {
 			if !errors.Is(err, redis.Nil) {
