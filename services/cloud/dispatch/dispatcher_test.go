@@ -98,6 +98,35 @@ func TestDispatcher_BlockedRetryStaysPendingWithoutDuplicating(t *testing.T) {
 	}
 }
 
+// TestDispatcher_DrainReturnsOnEmptyStream pins drain's non-blocking
+// contract: with nothing in jobs:pending it must return to Run's select
+// loop immediately. A blocking XREADGROUP here (BLOCK 0 = wait forever;
+// go-redis sends BLOCK for any Block >= 0, so only a negative Block omits
+// it) would pin the dispatcher goroutine inside drain and starve the
+// available-event and XAUTOCLAIM sweep cases forever.
+func TestDispatcher_DrainReturnsOnEmptyStream(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+	ctx := context.Background()
+
+	di := &Dispatcher{Deps: Deps{Redis: rdb}, NodeID: "test-node"}
+	if err := di.EnsureGroup(ctx); err != nil {
+		t.Fatalf("EnsureGroup: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		di.drain(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain blocked on an empty stream; XREADGROUP must not send BLOCK")
+	}
+}
+
 // TestDispatcher_EnsureGroupIsIdempotent confirms calling EnsureGroup
 // twice (every node does this on startup, and a node can restart) doesn't
 // error on the second call -- BUSYGROUP is the expected, swallowed case.

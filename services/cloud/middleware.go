@@ -28,10 +28,9 @@ func optionalAuth(pubKey *rsa.PublicKey) func(http.Handler) http.Handler {
 	}
 }
 
-// requireAuth rejects requests without a valid Bearer token. Built in
-// Phase 2 per the roadmap but not yet wired to any route -- it has no
-// callers until the account pages (Phase 8) and admin endpoints (Phase 9)
-// exist. Declared now so those phases attach it rather than reinvent it.
+// requireAuth rejects requests without a valid Bearer token. Wired to
+// POST /auth/logout today; the account pages (Phase 8) and admin
+// endpoints (Phase 9) attach it to their routes as they land.
 func requireAuth(pubKey *rsa.PublicKey) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
