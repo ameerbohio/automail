@@ -197,6 +197,11 @@ func main() {
 
 	mux.Handle("POST /jobs/upload-url", optionalAuth(jwtPub)(http.HandlerFunc(srv.UploadURL)))
 	mux.Handle("POST /jobs", optionalAuth(jwtPub)(http.HandlerFunc(srv.CreateJob)))
+	// optionalAuth, not requireAuth: a Bearer JWT is only one of the two
+	// accepted credentials -- guests authenticate with ?token= instead,
+	// and StreamJob itself enforces that at least one checks out
+	// (plans/09-api-contracts.md "GET /jobs/:id/stream").
+	mux.Handle("GET /jobs/{id}/stream", optionalAuth(jwtPub)(http.HandlerFunc(srv.StreamJob)))
 
 	mux.HandleFunc("POST /auth/login", srv.Login)
 	mux.HandleFunc("POST /auth/refresh", srv.Refresh)

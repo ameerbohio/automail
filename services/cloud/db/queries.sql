@@ -101,6 +101,17 @@ UPDATE jobs SET status = 'dispatching' WHERE id = sqlc.arg(id);
 -- any live node -- plans/05-cloud-server.md "Presence and liveness").
 UPDATE jobs SET status = 'queued' WHERE id = sqlc.arg(id);
 
+-- name: GetJobForStream :one
+-- Phase 5's GET /jobs/:id/stream lookup: the two credentials a stream
+-- request can be authorized against (sender_id for the JWT ownership
+-- check, guest_token_hash for the ?token= check) plus the current status
+-- for the initial snapshot event. Deliberately does NOT select
+-- encrypted_key -- the SSE path never touches ciphertext key material
+-- (plans/02-security.md "Zero-Knowledge Guarantee").
+SELECT id, sender_id, guest_token_hash, status
+FROM jobs
+WHERE id = $1;
+
 -- name: UpdateJobStatus :one
 -- Applied from "status" printer-link frames (plans/05-cloud-server.md
 -- "Status frames"). Phase 3 only ever writes 'delivered' (the dev-mode
