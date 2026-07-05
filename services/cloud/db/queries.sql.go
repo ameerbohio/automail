@@ -32,6 +32,37 @@ func (q *Queries) GetActiveRefreshToken(ctx context.Context, tokenHash string) (
 	return i, err
 }
 
+const getJobForStream = `-- name: GetJobForStream :one
+SELECT id, sender_id, guest_token_hash, status
+FROM jobs
+WHERE id = $1
+`
+
+type GetJobForStreamRow struct {
+	ID             uuid.UUID      `json:"id"`
+	SenderID       uuid.NullUUID  `json:"sender_id"`
+	GuestTokenHash sql.NullString `json:"guest_token_hash"`
+	Status         string         `json:"status"`
+}
+
+// Phase 5's GET /jobs/:id/stream lookup: the two credentials a stream
+// request can be authorized against (sender_id for the JWT ownership
+// check, guest_token_hash for the ?token= check) plus the current status
+// for the initial snapshot event. Deliberately does NOT select
+// encrypted_key -- the SSE path never touches ciphertext key material
+// (plans/02-security.md "Zero-Knowledge Guarantee").
+func (q *Queries) GetJobForStream(ctx context.Context, id uuid.UUID) (GetJobForStreamRow, error) {
+	row := q.db.QueryRowContext(ctx, getJobForStream, id)
+	var i GetJobForStreamRow
+	err := row.Scan(
+		&i.ID,
+		&i.SenderID,
+		&i.GuestTokenHash,
+		&i.Status,
+	)
+	return i, err
+}
+
 const getSenderByEmail = `-- name: GetSenderByEmail :one
 SELECT id, email_enc, password_hash, role
 FROM senders
