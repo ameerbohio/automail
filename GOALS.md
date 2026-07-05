@@ -68,7 +68,7 @@ modules build, vet, and test green; `git log -1` shows the fix commit.
 
 ## Goal 1 — Phase 5: SSE + Status Relay
 
-**Status:** pending
+**Status:** done
 
 Implement exactly Phase 5 of `plans/10-implementation-roadmap.md`. Scope:
 
@@ -226,3 +226,4 @@ Audit the repo:
 | Date | Goal | Commit | Outcome |
 |------|------|--------|---------|
 | 2026-07-05 | Goal 0 | 21af1f3 | Review fixes landed: XReadGroup Block:-1 (BLOCK 0 = wait forever), rune-safe maskName, requireAuth comment; both modules build/vet/test green. |
+| 2026-07-05 | Goal 1 | 69d11ba | Phase 5 SSE relay: /jobs/:id/stream with dual auth, job_id restored to wire format, terminal close, two-node fan-out test. plan-checker PASS. Browser Verify deferred: Docker unavailable in session; covered by in-process cross-node test. |
