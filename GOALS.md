@@ -92,7 +92,7 @@ polling. Study doc: SSE vs WebSocket choice + Redis pub/sub fan-out. One commit.
 
 ## Goal 2 — Phase 6: Full Crypto in the Printer
 
-**Status:** pending
+**Status:** done
 
 Implement exactly Phase 6 of `plans/10-implementation-roadmap.md`. Scope:
 
@@ -227,3 +227,4 @@ Audit the repo:
 |------|------|--------|---------|
 | 2026-07-05 | Goal 0 | 21af1f3 | Review fixes landed: XReadGroup Block:-1 (BLOCK 0 = wait forever), rune-safe maskName, requireAuth comment; both modules build/vet/test green. |
 | 2026-07-05 | Goal 1 | 69d11ba | Phase 5 SSE relay: /jobs/:id/stream with dual auth, job_id restored to wire format, terminal close, two-node fan-out test. plan-checker PASS. Browser Verify deferred: Docker unavailable in session; covered by in-process cross-node test. |
+| 2026-07-06 | Goal 2 | 9dedbdb | Phase 6 printer crypto: RSA-OAEP unwrap + AES-256-GCM decrypt in RAM, /dev/shm tmpfs, unlink-before-delivered, zero+GC; PBES2 PKCS#8 key load with hand-rolled PBKDF2 (no new dep), passphrase zeroed+env-unset; generic wire error (no oracle). Cloud: delete spent ciphertext on delivered (blob_ref only, never encrypted_key). plan-checker PASS (fixed GC-order nit + stale plans/04 dev-mode text). Browser/Docker E2E deferred; covered by full-pipeline unit test. |
