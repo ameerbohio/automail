@@ -53,6 +53,13 @@ RETURNING id, status;
 -- name: InsertAuditEvent :exec
 INSERT INTO audit_events (job_id, action, actor_id) VALUES ($1, $2, $3);
 
+-- name: SetJobBlobDeleted :exec
+-- Marks a delivered job's ciphertext as removed from object storage
+-- (plans/05-cloud-server.md "On delivered: ... Update job blob_deleted_at").
+-- Metadata only -- the zero-knowledge boundary is untouched: this never
+-- reads or writes encrypted_key.
+UPDATE jobs SET blob_deleted_at = now() WHERE id = sqlc.arg(id);
+
 -- name: GetSenderByEmail :one
 -- Same decrypt-then-compare approach as SearchRecipients -- email_enc has
 -- no plaintext index, so this is a full scan at prototype scale.

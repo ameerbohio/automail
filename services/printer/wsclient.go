@@ -15,13 +15,13 @@ import (
 // register, run the connection until it errors, then back off and dial
 // again. It never returns except via ctx cancellation
 // (plans/04-printer-microservice.md "Connection lifecycle").
-func runClient(ctx context.Context, cfg config, state *slotState) {
+func runClient(ctx context.Context, cfg config, state *slotState, key *printerKey) {
 	attempt := 0
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := connectAndServe(ctx, cfg, state); err != nil {
+		if err := connectAndServe(ctx, cfg, state, key); err != nil {
 			log.Printf("printer: connection attempt failed: %v", err)
 		}
 		setConnected(false)
@@ -58,7 +58,7 @@ func backoffWithJitter(attempt int, maxBackoff time.Duration) time.Duration {
 // connectAndServe dials once, registers, and runs the connection's
 // read/keepalive loops until one of them errors -- at which point the
 // connection is considered dead and the caller reconnects.
-func connectAndServe(ctx context.Context, cfg config, state *slotState) error {
+func connectAndServe(ctx context.Context, cfg config, state *slotState, key *printerKey) error {
 	tlsConfig, err := newMTLSClientConfig(cfg)
 	if err != nil {
 		return err
@@ -104,7 +104,7 @@ func connectAndServe(ctx context.Context, cfg config, state *slotState) error {
 
 	errCh := make(chan error, 2)
 	go func() { errCh <- runKeepalive(connCtx, conn, cfg.HeartbeatInterval) }()
-	go func() { errCh <- readLoop(connCtx, conn, cfg, send) }()
+	go func() { errCh <- readLoop(connCtx, conn, cfg, state, key, send) }()
 
 	err = <-errCh
 	cancel()
@@ -114,7 +114,7 @@ func connectAndServe(ctx context.Context, cfg config, state *slotState) error {
 // readLoop receives dispatch frames and hands each to its own goroutine
 // (plans/04-printer-microservice.md "handed to a worker goroutine so the
 // read loop stays free for keepalive and further frames").
-func readLoop(ctx context.Context, conn *websocket.Conn, cfg config, send func(Frame)) error {
+func readLoop(ctx context.Context, conn *websocket.Conn, cfg config, state *slotState, key *printerKey, send func(Frame)) error {
 	for {
 		var frame Frame
 		if err := wsjson.Read(ctx, conn, &frame); err != nil {
@@ -122,7 +122,7 @@ func readLoop(ctx context.Context, conn *websocket.Conn, cfg config, send func(F
 		}
 		switch frame.Type {
 		case "dispatch":
-			go handleDispatch(ctx, frame, cfg.DevMode, send)
+			go handleDispatch(ctx, frame, cfg, state, key, send)
 		default:
 			log.Printf("printer: ignoring unknown frame type %q", frame.Type)
 		}

@@ -46,6 +46,15 @@ func PresignedReadURL(ctx context.Context, client *minio.Client, blobRef string,
 	return u.String(), nil
 }
 
+// RemoveBlob deletes a delivered job's ciphertext from object storage.
+// Called after the printer reports "delivered": the ciphertext has been
+// decrypted and printed, so keeping it around only widens the window in
+// which it could be exfiltrated (plans/05-cloud-server.md "On delivered:
+// request MinIO blob deletion"). Keyed on blob_ref -- never encrypted_key.
+func RemoveBlob(ctx context.Context, client *minio.Client, blobRef string) error {
+	return client.RemoveObject(ctx, bucket, blobRef, minio.RemoveObjectOptions{})
+}
+
 // BlobExists checks a blob_ref was actually uploaded before POST /jobs
 // accepts it -- the 422 INVALID_BLOB_REF precheck in plans/09-api-contracts.md.
 func BlobExists(ctx context.Context, client *minio.Client, blobRef string) (bool, error) {
