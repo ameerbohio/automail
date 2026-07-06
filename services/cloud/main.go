@@ -160,6 +160,13 @@ func main() {
 		Redis:   rdb,
 		Minio:   minioClient,
 	}
+	hub := link.NewHub(rdb, queries)
+	// On "delivered", the printer-link hub deletes the spent ciphertext from
+	// MinIO (plans/05-cloud-server.md). Injected here so the hub package
+	// takes no MinIO dependency and stays unit-testable with a fake.
+	hub.DeleteBlob = func(ctx context.Context, blobRef string) error {
+		return minioclient.RemoveBlob(ctx, minioClient, blobRef)
+	}
 	srv := &handlers.Server{
 		Queries:    queries,
 		SQLDB:      sqlDB,
@@ -168,7 +175,7 @@ func main() {
 		AppKey:     mustEnv("APP_ENCRYPTION_KEY"),
 		JWTPriv:    jwtPriv,
 		JWTPub:     jwtPub,
-		Hub:        link.NewHub(rdb, queries),
+		Hub:        hub,
 		Dispatcher: dispatchDeps,
 	}
 

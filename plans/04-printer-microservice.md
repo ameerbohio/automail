@@ -100,7 +100,7 @@ A received `dispatch` frame is handed to a worker goroutine so the read loop sta
 10. Update slot occupancy; send a state frame reflecting the new occupancy
 ```
 
-**Dev mode** (`DEV_MODE=true`): skip step 6 (CUPS); write to `/tmp/automail-dev-<job_id>.pdf`, log "dev: would print", delete immediately.
+**Dev mode** (`DEV_MODE=true`): skip **only** step 6 (the physical `lp`/CUPS call). Steps 1–5 still run — including the real RSA/AES decryption — so the plaintext is written to the same tmpfs path (`/dev/shm/automail-<job_id>.pdf`) and unlinked (step 7) exactly as in production; dev mode just logs "dev: would print" in place of the `lp` invocation. Plaintext is never written to `/tmp` or any disk-backed path, even in dev, because it is now real decrypted content. (Superseded the earlier "write a dummy file to `/tmp`" Phase 3 stub, which pre-dated real decryption.)
 
 ---
 

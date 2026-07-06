@@ -23,6 +23,13 @@ type Hub struct {
 	Registry *Registry
 	Redis    *redis.Client
 	Queries  *db.Queries
+	// DeleteBlob removes a delivered job's ciphertext from object storage.
+	// Injected (real MinIO RemoveObject in main; a fake in tests) so the hub
+	// stays testable without a live MinIO. A nil DeleteBlob disables
+	// deletion -- the blob is left for a TTL/sweep to reclaim -- so older
+	// callers that predate the blob lifecycle keep working unchanged. It is
+	// handed only blob_ref; encrypted_key never reaches this path.
+	DeleteBlob func(ctx context.Context, blobRef string) error
 }
 
 func NewHub(rdb *redis.Client, queries *db.Queries) *Hub {
@@ -125,11 +132,11 @@ func (h *Hub) onState(ctx context.Context, mailboxID string, frame Frame) {
 	}
 }
 
-// onStatus applies a job lifecycle update to Postgres and relays it to
-// any sender watching via SSE (Phase 5). "delivered" additionally
-// triggers blob cleanup in later phases; Phase 3's dev-mode dispatch
-// already deletes its dummy file itself, so no MinIO call happens here
-// yet -- that lands with Phase 4/6's real blob lifecycle.
+// onStatus applies a job lifecycle update to Postgres and relays it to any
+// sender watching via SSE (Phase 5). On "delivered" it also deletes the
+// now-spent ciphertext blob from object storage (Phase 6's real blob
+// lifecycle) -- the printer has decrypted and printed it, so the ciphertext
+// no longer needs to exist.
 func (h *Hub) onStatus(ctx context.Context, frame Frame) {
 	jobID, err := uuid.Parse(frame.JobID)
 	if err != nil {
@@ -155,7 +162,36 @@ func (h *Hub) onStatus(ctx context.Context, frame Frame) {
 	payload, _ := jsonStatusPayload(frame)
 	h.Redis.Publish(ctx, "job:"+jobID.String()+":status", payload)
 
+	// Delete the ciphertext AFTER the SSE publish so a slow or failed delete
+	// never delays the sender's status update. Keyed on job.BlobRef only --
+	// the zero-knowledge boundary is preserved (no encrypted_key here).
+	if frame.Status == "delivered" {
+		h.deleteDeliveredBlob(ctx, jobID, job.BlobRef)
+	}
+
 	log.Printf("printer-link: job %s -> %s (mailbox %s)", job.ID, job.Status, job.MailboxID)
+}
+
+// deleteDeliveredBlob removes a delivered job's ciphertext and records the
+// deletion (blob_deleted_at + an audit event). A delete failure is logged
+// and swallowed: the job is delivered regardless, and a leftover blob is a
+// hygiene issue for a TTL/sweep to reclaim, not a correctness one.
+func (h *Hub) deleteDeliveredBlob(ctx context.Context, jobID uuid.UUID, blobRef string) {
+	if h.DeleteBlob == nil {
+		log.Printf("printer-link: job %s delivered but blob deletion is not configured", jobID)
+		return
+	}
+	if err := h.DeleteBlob(ctx, blobRef); err != nil {
+		log.Printf("printer-link: job %s: delete blob %s: %v", jobID, blobRef, err)
+		return
+	}
+	if err := h.Queries.SetJobBlobDeleted(ctx, jobID); err != nil {
+		log.Printf("printer-link: job %s: mark blob_deleted_at: %v", jobID, err)
+	}
+	if err := h.Queries.InsertAuditEvent(ctx, db.InsertAuditEventParams{JobID: jobID, Action: "blob_deleted"}); err != nil {
+		log.Printf("printer-link: job %s: audit blob_deleted: %v", jobID, err)
+	}
+	log.Printf("printer-link: job %s: ciphertext blob deleted", jobID)
 }
 
 // pumpDispatch relays Redis-published dispatch payloads down this

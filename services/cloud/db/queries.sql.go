@@ -352,6 +352,19 @@ func (q *Queries) SearchRecipients(ctx context.Context, arg SearchRecipientsPara
 	return items, nil
 }
 
+const setJobBlobDeleted = `-- name: SetJobBlobDeleted :exec
+UPDATE jobs SET blob_deleted_at = now() WHERE id = $1
+`
+
+// Marks a delivered job's ciphertext as removed from object storage
+// (plans/05-cloud-server.md "On delivered: ... Update job blob_deleted_at").
+// Metadata only -- the zero-knowledge boundary is untouched: this never
+// reads or writes encrypted_key.
+func (q *Queries) SetJobBlobDeleted(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, setJobBlobDeleted, id)
+	return err
+}
+
 const updateJobStatus = `-- name: UpdateJobStatus :one
 UPDATE jobs
 SET status = $1,

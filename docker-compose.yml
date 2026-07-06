@@ -118,6 +118,13 @@ services:
       RECONNECT_MAX_BACKOFF: "30"
       DEV_MODE: "true"
       LISTEN_ADDR: ":8444"
+      # Document-decryption key (Phase 6). Required even in DEV_MODE: dev mode
+      # still runs the full RSA/AES decrypt and only skips the physical lp
+      # call. Generate the key first with:
+      #   PRINTER_KEY_PASSPHRASE=... ./infra/certs/gen-printer-keys.sh
+      PRINTER_PRIVATE_KEY_PATH: /certs/printer-private.pem
+      PRINTER_KEY_PASSPHRASE: ${PRINTER_KEY_PASSPHRASE:-changeme-printer-passphrase}
+      PRINTER_NAME: ${PRINTER_NAME:-}
     volumes:
       - ./infra/certs:/certs:ro
     networks:

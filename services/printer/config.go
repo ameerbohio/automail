@@ -22,6 +22,12 @@ type config struct {
 	DevMode           bool
 	ListenAddr        string
 	PrinterName       string
+	// PrinterPrivateKeyPath points at the encrypted RSA document key. It is
+	// required in every mode, including DEV_MODE: dev mode still runs the
+	// full decrypt pipeline and only skips the physical `lp` call. The
+	// passphrase (PRINTER_KEY_PASSPHRASE) is read directly in main.go, not
+	// stored here, so it lives no longer than the one-time key load.
+	PrinterPrivateKeyPath string
 }
 
 func mustEnv(key string) string {
@@ -59,6 +65,8 @@ func loadConfig() config {
 		ReconnectMaxBack:  envDurationSeconds("RECONNECT_MAX_BACKOFF", 30*time.Second),
 		DevMode:           os.Getenv("DEV_MODE") == "true",
 		ListenAddr:        listenAddr,
-		PrinterName:       os.Getenv("PRINTER_NAME"), // unused until Phase 6's lp call
+		PrinterName:       os.Getenv("PRINTER_NAME"), // used by the lp call in non-dev mode
+
+		PrinterPrivateKeyPath: mustEnv("PRINTER_PRIVATE_KEY_PATH"),
 	}
 }
