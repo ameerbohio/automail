@@ -145,9 +145,12 @@ server never sees key material. One commit.
 
 Implement exactly Phase 8 of `plans/10-implementation-roadmap.md`. Scope:
 
-- Register/login pages using the existing Phase 2 auth endpoints (HttpOnly
-  refresh-cookie flow already exists server-side; a register endpoint may need
-  to be added — check `plans/09-api-contracts.md` first).
+- Add the `POST /auth/register` endpoint to the cloud server per the now-final
+  contract in `plans/09-api-contracts.md`: **open self-service** signup (no
+  invite, no admin approval, no email verification), email + password, bcrypt
+  hash, `role` forced to `sender`, **auto-login on 201** (issues the same token
+  pair as `Login`), `409 EMAIL_TAKEN` / `422 VALIDATION`. Then register/login
+  pages on the portal wired to it and the existing HttpOnly refresh-cookie flow.
 - Authenticated `POST /jobs` path stores `sender_id`, issues no guest token
   (server already does this; wire the portal to send the Bearer token).
 - `/history` page: the authenticated sender's jobs and statuses.
