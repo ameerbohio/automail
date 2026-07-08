@@ -36,12 +36,14 @@ Sets `Set-Cookie: refresh_token=<token>; HttpOnly; Secure; SameSite=Strict; Path
 
 ### `POST /auth/register`
 
-> **DRAFT — pending owner review (Phase 8 / Goal 4).** Registration was not
-> specified in the original contracts; this section is a proposal to unblock
-> Phase 8. Edit or reject before implementation. The `senders` table
-> (`08-data-models.md`) already has `email`, `password_hash`, `role`.
-
 **Auth**: None (rate-limited at Traefik — account creation is abuse-sensitive)
+
+Registration is **open self-service**: any resident can create a sender account
+to send mail and see their own history, with the least possible friction. There
+is no invite, no admin approval, and no email-verification step in the prototype
+— sign up and you are immediately logged in. The `senders` table
+(`08-data-models.md`) already has `email`, `password_hash`, `role`.
+
 **Body**:
 ```json
 { "email": "sender@example.com", "password": "..." }
@@ -51,11 +53,12 @@ Sets `Set-Cookie: refresh_token=<token>; HttpOnly; Secure; SameSite=Strict; Path
 - `email` must be a syntactically valid address and unique in `senders`.
 - `password` minimum 8 characters. Hashed with bcrypt (same cost as `Login`);
   the plaintext password is never stored or logged.
-- New rows get `role = 'sender'` — the admin role is never self-assignable.
+- New rows get `role = 'sender'` — the admin role is never self-assignable
+  through this endpoint.
 
-**Effect**: inserts a `senders` row, then **auto-logs-in** so the portal lands
-the user straight in the authenticated flow (same token pair `Login` issues) —
-no separate login round-trip after signup.
+**Effect**: inserts a `senders` row, then **auto-logs-in** — it issues the same
+token pair `Login` does, so the portal lands the user straight in the
+authenticated flow with no second round-trip.
 
 **Response `201`**:
 ```json
@@ -66,11 +69,8 @@ Sets `Set-Cookie: refresh_token=<token>; HttpOnly; Secure; SameSite=Strict; Path
 **Response `409`**: email already registered (`code: EMAIL_TAKEN`)
 **Response `422`**: invalid email or password too weak (`code: VALIDATION`)
 
-*Open questions for the owner:* (1) open self-service signup vs. invite-only —
-this draft assumes open. (2) whether to auto-login on register (drafted: yes)
-or require a separate `POST /auth/login`. (3) email verification is out of scope
-for the prototype unless you want it. If registration should instead be
-admin-provisioned only, drop this endpoint and seed `senders` out-of-band.
+The guest flow is unaffected — sending mail never requires an account; an
+account only adds persistent, tokenless job history.
 
 ---
 
@@ -298,4 +298,4 @@ Pushed when the cloud server dispatches a job to this printer (replaces the old 
 }
 ```
 
-Common codes: `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `RECIPIENT_NOT_FOUND`, `SLOT_UNASSIGNED`, `PRINTER_UNAVAILABLE`, `SLOT_FULL`, `INVALID_BLOB_REF`, `GUEST_TOKEN_INVALID`
+Common codes: `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `RECIPIENT_NOT_FOUND`, `SLOT_UNASSIGNED`, `PRINTER_UNAVAILABLE`, `SLOT_FULL`, `INVALID_BLOB_REF`, `GUEST_TOKEN_INVALID`, `EMAIL_TAKEN`, `VALIDATION`
