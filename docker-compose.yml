@@ -139,6 +139,10 @@ services:
     build: ./services/portal
     networks:
       - automail
+    environment:
+      # Server-side base URL for the Next.js API proxy routes (app/api/*).
+      # Never exposed to the browser -- all browser calls hit same-origin /api.
+      CLOUD_API_URL: http://cloud-server:8080
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.portal.rule=Host(`automail.local`)"
