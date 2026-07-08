@@ -34,6 +34,46 @@ Sets `Set-Cookie: refresh_token=<token>; HttpOnly; Secure; SameSite=Strict; Path
 
 ---
 
+### `POST /auth/register`
+
+> **DRAFT — pending owner review (Phase 8 / Goal 4).** Registration was not
+> specified in the original contracts; this section is a proposal to unblock
+> Phase 8. Edit or reject before implementation. The `senders` table
+> (`08-data-models.md`) already has `email`, `password_hash`, `role`.
+
+**Auth**: None (rate-limited at Traefik — account creation is abuse-sensitive)
+**Body**:
+```json
+{ "email": "sender@example.com", "password": "..." }
+```
+
+**Validation** (server-side, authoritative):
+- `email` must be a syntactically valid address and unique in `senders`.
+- `password` minimum 8 characters. Hashed with bcrypt (same cost as `Login`);
+  the plaintext password is never stored or logged.
+- New rows get `role = 'sender'` — the admin role is never self-assignable.
+
+**Effect**: inserts a `senders` row, then **auto-logs-in** so the portal lands
+the user straight in the authenticated flow (same token pair `Login` issues) —
+no separate login round-trip after signup.
+
+**Response `201`**:
+```json
+{ "access_token": "<jwt>", "expires_in": 900 }
+```
+Sets `Set-Cookie: refresh_token=<token>; HttpOnly; Secure; SameSite=Strict; Path=/auth/refresh`
+
+**Response `409`**: email already registered (`code: EMAIL_TAKEN`)
+**Response `422`**: invalid email or password too weak (`code: VALIDATION`)
+
+*Open questions for the owner:* (1) open self-service signup vs. invite-only —
+this draft assumes open. (2) whether to auto-login on register (drafted: yes)
+or require a separate `POST /auth/login`. (3) email verification is out of scope
+for the prototype unless you want it. If registration should instead be
+admin-provisioned only, drop this endpoint and seed `senders` out-of-band.
+
+---
+
 ### `POST /auth/refresh`
 
 **Auth**: Refresh token cookie  
