@@ -195,10 +195,33 @@ Note for the Phase 5 implementer: the internal `job:<id>:status` Redis pub/sub p
 
 ---
 
+### `GET /admin/summary`
+
+**Auth**: Bearer JWT (`admin` role)
+
+Aggregate figures for the `/admin` overview (`07-ops-dashboard.md`) — the
+numbers the two list endpoints below cannot cheaply produce (queue depth would
+be one call per status; "completed today" is a time-bounded count the paginated
+job list can't express). Metadata only: pure counts, no job identifiers, no
+ciphertext.
+
+**Response `200`**:
+```json
+{
+  "status_counts": { "queued": 1, "dispatching": 0, "printing": 1, "delivered": 5, "failed": 0 },
+  "queue_depth": 1,
+  "completed_today": 3
+}
+```
+`queue_depth` counts jobs awaiting a printer (`submitted` + `queued` +
+`dispatching`). `completed_today` counts jobs `delivered` since 00:00 UTC.
+
+---
+
 ### `GET /admin/jobs`
 
 **Auth**: Bearer JWT (`admin` role)  
-**Query params**: `status` (optional filter), `page` (default 1), `per_page` (default 50)  
+**Query params**: `status` (optional exact-status filter; empty = all), `page` (default 1), `per_page` (default 50, max 200)  
 **Response `200`**:
 ```json
 {

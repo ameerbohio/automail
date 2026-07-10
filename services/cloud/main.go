@@ -218,6 +218,13 @@ func main() {
 	mux.HandleFunc("POST /auth/refresh", srv.Refresh)
 	mux.Handle("POST /auth/logout", requireAuth(jwtPub)(http.HandlerFunc(srv.Logout)))
 
+	// Ops dashboard (Phase 9). requireAdmin: Bearer JWT with an admin role
+	// claim (plans/07-ops-dashboard.md). Metadata only -- no admin endpoint
+	// returns encrypted_key or blob_ref.
+	mux.Handle("GET /admin/summary", requireAdmin(jwtPub)(http.HandlerFunc(srv.AdminSummary)))
+	mux.Handle("GET /admin/jobs", requireAdmin(jwtPub)(http.HandlerFunc(srv.AdminJobs)))
+	mux.Handle("GET /admin/mailboxes", requireAdmin(jwtPub)(http.HandlerFunc(srv.AdminMailboxes)))
+
 	if mtlsPort := os.Getenv("MTLS_PORT"); mtlsPort != "" {
 		go func() {
 			if err := startMTLSServer(":"+mtlsPort, srv); err != nil {

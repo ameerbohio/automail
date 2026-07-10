@@ -13,6 +13,238 @@ import (
 	"github.com/google/uuid"
 )
 
+const adminCountDeliveredSince = `-- name: AdminCountDeliveredSince :one
+SELECT count(*) FROM jobs
+WHERE status = 'delivered' AND delivered_at >= $1
+`
+
+// "Jobs completed today" for the overview -- delivered jobs whose delivered_at
+// is on/after the given instant (the handler passes start-of-day UTC).
+func (q *Queries) AdminCountDeliveredSince(ctx context.Context, since sql.NullTime) (int64, error) {
+	row := q.db.QueryRowContext(ctx, adminCountDeliveredSince, since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const adminCountJobs = `-- name: AdminCountJobs :one
+SELECT count(*) FROM jobs
+WHERE ($1::text = '' OR jobs.status = $1::text)
+`
+
+// Total row count for the same (optionally status-filtered) set AdminListJobs
+// pages over, so GET /admin/jobs can return an accurate "total" for the UI's
+// pagination independent of the current page window.
+func (q *Queries) AdminCountJobs(ctx context.Context, status string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, adminCountJobs, status)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const adminJobStatusCounts = `-- name: AdminJobStatusCounts :many
+SELECT status, count(*) AS count
+FROM jobs
+GROUP BY status
+`
+
+type AdminJobStatusCountsRow struct {
+	Status string `json:"status"`
+	Count  int64  `json:"count"`
+}
+
+// Phase 9 /admin overview (plans/07-ops-dashboard.md): one row per status with
+// its count. Feeds the queue-depth tally (submitted+queued+dispatching) and
+// the per-status breakdown. Metadata only.
+func (q *Queries) AdminJobStatusCounts(ctx context.Context) ([]AdminJobStatusCountsRow, error) {
+	rows, err := q.db.QueryContext(ctx, adminJobStatusCounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AdminJobStatusCountsRow
+	for rows.Next() {
+		var i AdminJobStatusCountsRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const adminListJobs = `-- name: AdminListJobs :many
+SELECT
+  jobs.id,
+  jobs.slot_id,
+  mailbox_slots.slot_number,
+  jobs.status,
+  jobs.page_count,
+  jobs.created_at,
+  jobs.delivered_at
+FROM jobs
+JOIN mailbox_slots ON mailbox_slots.id = jobs.slot_id
+WHERE ($1::text = '' OR jobs.status = $1::text)
+ORDER BY jobs.created_at DESC
+LIMIT $3 OFFSET $2
+`
+
+type AdminListJobsParams struct {
+	Status    string `json:"status"`
+	RowOffset int32  `json:"row_offset"`
+	RowLimit  int32  `json:"row_limit"`
+}
+
+type AdminListJobsRow struct {
+	ID          uuid.UUID    `json:"id"`
+	SlotID      uuid.UUID    `json:"slot_id"`
+	SlotNumber  int32        `json:"slot_number"`
+	Status      string       `json:"status"`
+	PageCount   int32        `json:"page_count"`
+	CreatedAt   time.Time    `json:"created_at"`
+	DeliveredAt sql.NullTime `json:"delivered_at"`
+}
+
+// Phase 9 GET /admin/jobs (plans/09-api-contracts.md). Operator-facing job
+// table, newest first, paginated. Metadata only: like GetJobsBySender it
+// deliberately never selects encrypted_key or blob_ref -- the admin views
+// expose no ciphertext (zero-knowledge invariant, plans/02-security.md). The
+// slot_number join gives the human-readable "Slot 3" the dashboard shows
+// instead of the raw slot UUID. An empty status arg matches every status
+// (the "All" filter); a non-empty one is an exact match.
+func (q *Queries) AdminListJobs(ctx context.Context, arg AdminListJobsParams) ([]AdminListJobsRow, error) {
+	rows, err := q.db.QueryContext(ctx, adminListJobs, arg.Status, arg.RowOffset, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AdminListJobsRow
+	for rows.Next() {
+		var i AdminListJobsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SlotID,
+			&i.SlotNumber,
+			&i.Status,
+			&i.PageCount,
+			&i.CreatedAt,
+			&i.DeliveredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const adminListMailboxes = `-- name: AdminListMailboxes :many
+SELECT
+  mailboxes.id AS mailbox_id,
+  buildings.address AS building_address,
+  mailboxes.status,
+  mailboxes.last_heartbeat_at
+FROM mailboxes
+JOIN buildings ON buildings.id = mailboxes.building_id
+ORDER BY buildings.address
+`
+
+type AdminListMailboxesRow struct {
+	MailboxID       uuid.UUID    `json:"mailbox_id"`
+	BuildingAddress string       `json:"building_address"`
+	Status          string       `json:"status"`
+	LastHeartbeatAt sql.NullTime `json:"last_heartbeat_at"`
+}
+
+// Phase 9 GET /admin/mailboxes (plans/09-api-contracts.md). The stored mailbox
+// row + its building address. Live status and slot occupancy are NOT read from
+// here -- those come from the Redis mailbox:<id>:state cache the printer-link
+// hub keeps fresh (the DB status column is only the offline default; the hub
+// updates Redis, not this row). The handler overlays that cache per mailbox.
+func (q *Queries) AdminListMailboxes(ctx context.Context) ([]AdminListMailboxesRow, error) {
+	rows, err := q.db.QueryContext(ctx, adminListMailboxes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AdminListMailboxesRow
+	for rows.Next() {
+		var i AdminListMailboxesRow
+		if err := rows.Scan(
+			&i.MailboxID,
+			&i.BuildingAddress,
+			&i.Status,
+			&i.LastHeartbeatAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const adminListSlots = `-- name: AdminListSlots :many
+SELECT id, mailbox_id, slot_number, max_count
+FROM mailbox_slots
+ORDER BY mailbox_id, slot_number
+`
+
+type AdminListSlotsRow struct {
+	ID         uuid.UUID `json:"id"`
+	MailboxID  uuid.UUID `json:"mailbox_id"`
+	SlotNumber int32     `json:"slot_number"`
+	MaxCount   int32     `json:"max_count"`
+}
+
+// Every mailbox's configured slots (id, number, capacity), so the mailboxes
+// view can render a full "Slot 1: n/5" list even for a mailbox whose printer
+// is offline and therefore has no live Redis occupancy entry. max_count is the
+// authoritative capacity; current occupancy is overlaid from Redis.
+func (q *Queries) AdminListSlots(ctx context.Context) ([]AdminListSlotsRow, error) {
+	rows, err := q.db.QueryContext(ctx, adminListSlots)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AdminListSlotsRow
+	for rows.Next() {
+		var i AdminListSlotsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MailboxID,
+			&i.SlotNumber,
+			&i.MaxCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getActiveRefreshToken = `-- name: GetActiveRefreshToken :one
 SELECT id, sender_id, expires_at
 FROM refresh_tokens
@@ -490,4 +722,26 @@ func (q *Queries) UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams
 		&i.Status,
 	)
 	return i, err
+}
+
+const updateMailboxLiveness = `-- name: UpdateMailboxLiveness :exec
+UPDATE mailboxes
+SET status = $1, last_heartbeat_at = now()
+WHERE id = $2
+`
+
+type UpdateMailboxLivenessParams struct {
+	Status string    `json:"status"`
+	ID     uuid.UUID `json:"id"`
+}
+
+// Durable mirror of the Redis printer-state cache. plans/08-data-models.md:
+// mailboxes.status + last_heartbeat_at "are the durable mirror used by the ops
+// dashboard." Live dispatch reads the 90s Redis cache (mailbox:<id>:state); the
+// printer-link hub also writes this row on every register/state frame so the
+// ops dashboard can show a real last-heartbeat time. Best-effort from the hub's
+// perspective -- a failed update is logged, never fatal to the link.
+func (q *Queries) UpdateMailboxLiveness(ctx context.Context, arg UpdateMailboxLivenessParams) error {
+	_, err := q.db.ExecContext(ctx, updateMailboxLiveness, arg.Status, arg.ID)
+	return err
 }

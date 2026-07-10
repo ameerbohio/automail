@@ -18,6 +18,9 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Only account pages. Guest routes and /api/* are excluded.
-  matcher: ["/history/:path*", "/jobs/:path*"],
+  // Account + admin pages. Guest routes (/, /track) and /api/* are excluded.
+  // Note this gate only checks for a session cookie -- the admin ROLE check is
+  // enforced by the cloud server (requireAdmin -> 403), which the /admin pages
+  // surface as a "not authorized" note.
+  matcher: ["/history/:path*", "/jobs/:path*", "/admin/:path*"],
 };

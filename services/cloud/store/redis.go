@@ -29,6 +29,27 @@ type PrinterState struct {
 	SlotOccupancy map[string]SlotState `json:"slot_occupancy"`
 }
 
+// LookupPrinterState reads the cached printer state for a mailbox, reporting
+// whether the key was present. A missing key (found=false) means no live
+// printer: either none has ever registered or the 90s TTL lapsed since the
+// last frame -- the offline signal (see printerStateTTL). Callers that must
+// distinguish "offline" from "idle" (the ops dashboard, plans/07) use this;
+// GetPrinterState wraps it with the Phase 2 always-idle default for the
+// dispatch path, which treats a missing key as an empty-but-usable printer.
+func LookupPrinterState(ctx context.Context, rdb *redis.Client, mailboxID string) (state PrinterState, found bool, err error) {
+	val, err := rdb.Get(ctx, "mailbox:"+mailboxID+":state").Result()
+	if err == redis.Nil {
+		return PrinterState{}, false, nil
+	}
+	if err != nil {
+		return PrinterState{}, false, err
+	}
+	if err := json.Unmarshal([]byte(val), &state); err != nil {
+		return PrinterState{}, false, err
+	}
+	return state, true, nil
+}
+
 // GetPrinterState reads the cached printer state for a mailbox. No printer
 // has ever connected before Phase 3 builds /internal/printer-link, so a
 // missing key is not an error -- it stubs to idle with no slot data,
@@ -37,16 +58,12 @@ type PrinterState struct {
 // "unknown capacity" rather than always-available, but Phase 2 skips
 // dispatch entirely so that distinction doesn't matter yet.
 func GetPrinterState(ctx context.Context, rdb *redis.Client, mailboxID string) (PrinterState, error) {
-	val, err := rdb.Get(ctx, "mailbox:"+mailboxID+":state").Result()
-	if err == redis.Nil {
-		return PrinterState{Status: "idle", SlotOccupancy: map[string]SlotState{}}, nil
-	}
+	state, found, err := LookupPrinterState(ctx, rdb, mailboxID)
 	if err != nil {
 		return PrinterState{}, err
 	}
-	var state PrinterState
-	if err := json.Unmarshal([]byte(val), &state); err != nil {
-		return PrinterState{}, err
+	if !found {
+		return PrinterState{Status: "idle", SlotOccupancy: map[string]SlotState{}}, nil
 	}
 	return state, nil
 }

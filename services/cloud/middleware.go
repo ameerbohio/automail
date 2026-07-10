@@ -29,8 +29,8 @@ func optionalAuth(pubKey *rsa.PublicKey) func(http.Handler) http.Handler {
 }
 
 // requireAuth rejects requests without a valid Bearer token. Wired to
-// POST /auth/logout today; the account pages (Phase 8) and admin
-// endpoints (Phase 9) attach it to their routes as they land.
+// POST /auth/logout and the account history route; requireAdmin (below)
+// layers a role check on top for the ops-dashboard endpoints.
 func requireAuth(pubKey *rsa.PublicKey) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,6 +43,36 @@ func requireAuth(pubKey *rsa.PublicKey) func(http.Handler) http.Handler {
 			claims, err := jwtutil.ParseAccessToken(pubKey, after)
 			if err != nil {
 				handlers.WriteError(w, http.StatusUnauthorized, "invalid or expired token", "UNAUTHORIZED")
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(authctx.WithSender(r.Context(), claims.Subject, claims.Role)))
+		})
+	}
+}
+
+// requireAdmin gates the Phase 9 ops-dashboard endpoints (GET /admin/*):
+// a valid Bearer token AND an "admin" role claim (plans/07-ops-dashboard.md,
+// plans/09-api-contracts.md). A missing/invalid token is 401 UNAUTHORIZED; a
+// valid token for a non-admin (a regular sender) is 403 FORBIDDEN -- the
+// request is authenticated, just not entitled. The admin role is never
+// self-assignable: Register hard-codes role='sender', so an admin exists only
+// if seeded directly in the database.
+func requireAdmin(pubKey *rsa.PublicKey) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authz := r.Header.Get("Authorization")
+			after, ok := strings.CutPrefix(authz, "Bearer ")
+			if !ok {
+				handlers.WriteError(w, http.StatusUnauthorized, "missing bearer token", "UNAUTHORIZED")
+				return
+			}
+			claims, err := jwtutil.ParseAccessToken(pubKey, after)
+			if err != nil {
+				handlers.WriteError(w, http.StatusUnauthorized, "invalid or expired token", "UNAUTHORIZED")
+				return
+			}
+			if claims.Role != "admin" {
+				handlers.WriteError(w, http.StatusForbidden, "admin role required", "FORBIDDEN")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(authctx.WithSender(r.Context(), claims.Subject, claims.Role)))
