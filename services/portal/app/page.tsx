@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent, type ChangeEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   searchRecipients,
   getRecipientPublicKey,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/api";
 import { encryptDocument, bufferToBase64 } from "@/lib/encrypt";
 import { estimatePageCount } from "@/lib/pdf";
+import { useAuth } from "@/lib/auth";
 
 const MAX_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB (server enforces this too)
 
@@ -22,6 +24,8 @@ interface Submitted {
 }
 
 export default function Home() {
+  const { accessToken, isAuthenticated } = useAuth();
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Recipient[]>([]);
   const [selected, setSelected] = useState<Recipient | null>(null);
@@ -109,17 +113,27 @@ export default function Home() {
       log("Uploading encrypted blob…");
       await uploadBlob(upload_url, ciphertext);
 
-      // 4. Submit the job (no auth = guest). The AES key travels only as
+      // 4. Submit the job. Logged in -> send the Bearer token (job stored with
+      //    sender_id, no guest token). Guest -> no auth, server returns a
+      //    one-time guest_token. Either way the AES key travels only as
       //    RSA-wrapped encrypted_key; the plaintext never left this tab.
       log("Submitting job…");
-      const result = await createJob({
-        encrypted_key: bufferToBase64(encryptedKey),
-        blob_ref,
-        recipient_id: selected.recipient_id,
-        page_count: pageCount,
-      });
+      const result = await createJob(
+        {
+          encrypted_key: bufferToBase64(encryptedKey),
+          blob_ref,
+          recipient_id: selected.recipient_id,
+          page_count: pageCount,
+        },
+        accessToken,
+      );
 
       log("Done.");
+      if (isAuthenticated) {
+        // Authenticated senders track from their account -- no token to save.
+        router.push(`/jobs/${result.job_id}`);
+        return;
+      }
       setSubmitted({
         jobId: result.job_id,
         status: result.status,

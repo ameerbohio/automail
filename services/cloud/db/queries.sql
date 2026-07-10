@@ -72,6 +72,22 @@ SELECT id, password_hash, role
 FROM senders
 WHERE id = $1;
 
+-- name: InsertSender :one
+-- Phase 8 open registration (plans/09 POST /auth/register). email_enc and
+-- name_enc are pgcrypto-encrypted PII like the other columns; because
+-- pgp_sym_encrypt is non-deterministic there is no unique index on email_enc,
+-- so the handler pre-checks GetSenderByEmail for duplicates (prototype scale --
+-- a deterministic blind-index column would be the real fix). role is fixed to
+-- 'sender' here and is never caller-supplied -- admin is not self-assignable.
+INSERT INTO senders (email_enc, name_enc, password_hash, role)
+VALUES (
+  pgp_sym_encrypt(sqlc.arg(email)::text, sqlc.arg(app_key)),
+  pgp_sym_encrypt(sqlc.arg(name)::text, sqlc.arg(app_key)),
+  sqlc.arg(password_hash),
+  'sender'
+)
+RETURNING id, role;
+
 -- name: InsertRefreshToken :exec
 INSERT INTO refresh_tokens (sender_id, token_hash, expires_at)
 VALUES ($1, $2, $3);
@@ -130,3 +146,14 @@ SET status = sqlc.arg(status),
     delivered_at = CASE WHEN sqlc.arg(status) = 'delivered' THEN now() ELSE delivered_at END
 WHERE id = sqlc.arg(id)
 RETURNING id, mailbox_id, blob_ref, status;
+
+-- name: GetJobsBySender :many
+-- Phase 8 /history (GET /jobs, authenticated). A sender's own jobs, newest
+-- first. Metadata only -- deliberately never selects encrypted_key or blob_ref
+-- (zero-knowledge; plans/02-security.md). Bounded LIMIT keeps the response
+-- cheap at prototype scale.
+SELECT id, status, page_count, created_at, delivered_at
+FROM jobs
+WHERE sender_id = $1
+ORDER BY created_at DESC
+LIMIT 200;

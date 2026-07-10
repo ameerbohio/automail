@@ -14,12 +14,23 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  // Two auth modes, both required because EventSource cannot set headers:
+  //   - guest:         ?token=<guest_token>  -> forwarded as ?token=
+  //   - authenticated: ?access=<jwt>         -> sent up as Authorization Bearer
+  // The access token is short-lived and passed only at connect time; the cloud
+  // server does the JWT ownership check (StreamJob/authorizeStream).
   const token = req.nextUrl.searchParams.get("token");
+  const access = req.nextUrl.searchParams.get("access");
+  const headers: Record<string, string> = {
+    Accept: "text/event-stream",
+    ...forwardAuth(req),
+  };
+  if (access) headers.Authorization = `Bearer ${access}`;
   const qs = token ? `?token=${encodeURIComponent(token)}` : "";
   const upstream = await fetch(
     `${CLOUD_API_URL}/jobs/${encodeURIComponent(params.id)}/stream${qs}`,
     {
-      headers: { ...forwardAuth(req), Accept: "text/event-stream" },
+      headers,
       signal: req.signal,
     },
   );

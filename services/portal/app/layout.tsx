@@ -1,5 +1,6 @@
 import "./globals.css";
-import Link from "next/link";
+import { AuthProvider } from "@/lib/auth";
+import Nav from "./nav";
 
 export const metadata = {
   title: "Automail",
@@ -14,11 +15,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <nav className="top">
-          <Link href="/">Send</Link>
-          <Link href="/track">Track</Link>
-        </nav>
-        {children}
+        <AuthProvider>
+          <Nav />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

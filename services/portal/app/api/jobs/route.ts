@@ -16,3 +16,12 @@ export async function POST(req: NextRequest) {
   });
   return proxyJSON(upstream);
 }
+
+// GET /api/jobs -> cloud GET /jobs. Authenticated: the caller's own job
+// history. requireAuth on the cloud side rejects a missing Bearer with 401.
+export async function GET(req: NextRequest) {
+  const upstream = await fetch(`${CLOUD_API_URL}/jobs`, {
+    headers: forwardAuth(req),
+  });
+  return proxyJSON(upstream);
+}

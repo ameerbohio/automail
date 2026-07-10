@@ -26,3 +26,26 @@ export async function proxyJSON(upstream: Response): Promise<Response> {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+// The cloud server scopes its refresh cookie to Path=/auth/refresh, but the
+// browser only ever talks to the portal's proxy routes. Rewrite the path to
+// "/" so the browser returns the cookie to /api/auth/refresh AND so the
+// account-page middleware can see it. Covers both the set (login/register/
+// refresh) and the clear (logout) cookie, since both use the same path string.
+function rewriteCookiePath(cookie: string): string {
+  return cookie.replace(/Path=\/auth\/refresh/gi, "Path=/");
+}
+
+// proxyWithCookies relays an upstream auth response verbatim (status + body)
+// and forwards its Set-Cookie header(s) with the path rewritten. Used by the
+// /api/auth/* proxies so the HttpOnly refresh cookie survives the hop.
+export async function proxyWithCookies(upstream: Response): Promise<Response> {
+  const body = await upstream.text();
+  const headers = new Headers({
+    "Content-Type": upstream.headers.get("content-type") ?? "application/json",
+  });
+  for (const cookie of upstream.headers.getSetCookie()) {
+    headers.append("set-cookie", rewriteCookiePath(cookie));
+  }
+  return new Response(body || null, { status: upstream.status, headers });
+}
