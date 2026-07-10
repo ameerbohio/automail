@@ -157,3 +157,81 @@ FROM jobs
 WHERE sender_id = $1
 ORDER BY created_at DESC
 LIMIT 200;
+
+-- name: AdminListJobs :many
+-- Phase 9 GET /admin/jobs (plans/09-api-contracts.md). Operator-facing job
+-- table, newest first, paginated. Metadata only: like GetJobsBySender it
+-- deliberately never selects encrypted_key or blob_ref -- the admin views
+-- expose no ciphertext (zero-knowledge invariant, plans/02-security.md). The
+-- slot_number join gives the human-readable "Slot 3" the dashboard shows
+-- instead of the raw slot UUID. An empty status arg matches every status
+-- (the "All" filter); a non-empty one is an exact match.
+SELECT
+  jobs.id,
+  jobs.slot_id,
+  mailbox_slots.slot_number,
+  jobs.status,
+  jobs.page_count,
+  jobs.created_at,
+  jobs.delivered_at
+FROM jobs
+JOIN mailbox_slots ON mailbox_slots.id = jobs.slot_id
+WHERE (sqlc.arg(status)::text = '' OR jobs.status = sqlc.arg(status)::text)
+ORDER BY jobs.created_at DESC
+LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
+
+-- name: AdminCountJobs :one
+-- Total row count for the same (optionally status-filtered) set AdminListJobs
+-- pages over, so GET /admin/jobs can return an accurate "total" for the UI's
+-- pagination independent of the current page window.
+SELECT count(*) FROM jobs
+WHERE (sqlc.arg(status)::text = '' OR jobs.status = sqlc.arg(status)::text);
+
+-- name: AdminJobStatusCounts :many
+-- Phase 9 /admin overview (plans/07-ops-dashboard.md): one row per status with
+-- its count. Feeds the queue-depth tally (submitted+queued+dispatching) and
+-- the per-status breakdown. Metadata only.
+SELECT status, count(*) AS count
+FROM jobs
+GROUP BY status;
+
+-- name: AdminCountDeliveredSince :one
+-- "Jobs completed today" for the overview -- delivered jobs whose delivered_at
+-- is on/after the given instant (the handler passes start-of-day UTC).
+SELECT count(*) FROM jobs
+WHERE status = 'delivered' AND delivered_at >= sqlc.arg(since);
+
+-- name: UpdateMailboxLiveness :exec
+-- Durable mirror of the Redis printer-state cache. plans/08-data-models.md:
+-- mailboxes.status + last_heartbeat_at "are the durable mirror used by the ops
+-- dashboard." Live dispatch reads the 90s Redis cache (mailbox:<id>:state); the
+-- printer-link hub also writes this row on every register/state frame so the
+-- ops dashboard can show a real last-heartbeat time. Best-effort from the hub's
+-- perspective -- a failed update is logged, never fatal to the link.
+UPDATE mailboxes
+SET status = sqlc.arg(status), last_heartbeat_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: AdminListMailboxes :many
+-- Phase 9 GET /admin/mailboxes (plans/09-api-contracts.md). The stored mailbox
+-- row + its building address. Live status and slot occupancy are NOT read from
+-- here -- those come from the Redis mailbox:<id>:state cache the printer-link
+-- hub keeps fresh (the DB status column is only the offline default; the hub
+-- updates Redis, not this row). The handler overlays that cache per mailbox.
+SELECT
+  mailboxes.id AS mailbox_id,
+  buildings.address AS building_address,
+  mailboxes.status,
+  mailboxes.last_heartbeat_at
+FROM mailboxes
+JOIN buildings ON buildings.id = mailboxes.building_id
+ORDER BY buildings.address;
+
+-- name: AdminListSlots :many
+-- Every mailbox's configured slots (id, number, capacity), so the mailboxes
+-- view can render a full "Slot 1: n/5" list even for a mailbox whose printer
+-- is offline and therefore has no live Redis occupancy entry. max_count is the
+-- authoritative capacity; current occupancy is overlaid from Redis.
+SELECT id, mailbox_id, slot_number, max_count
+FROM mailbox_slots
+ORDER BY mailbox_id, slot_number;

@@ -90,6 +90,9 @@ func (h *Hub) Accept(ctx context.Context, w http.ResponseWriter, r *http.Request
 	if err := store.SetPrinterState(ctx, h.Redis, reg.MailboxID, registerToState(reg)); err != nil {
 		log.Printf("printer-link: mailbox %s: seed state cache: %v", reg.MailboxID, err)
 	}
+	// A freshly registered printer is idle and available. registerToState
+	// seeds the same "idle" into the Redis cache above.
+	h.mirrorLiveness(ctx, reg.MailboxID, "idle")
 
 	return h.readLoop(ctx, conn, reg.MailboxID)
 }
@@ -123,12 +126,34 @@ func (h *Hub) onState(ctx context.Context, mailboxID string, frame Frame) {
 		log.Printf("printer-link: mailbox %s: refresh state cache: %v", mailboxID, err)
 		return
 	}
+	h.mirrorLiveness(ctx, mailboxID, frame.Status)
 	if frame.Status == "idle" {
 		// Wakes the Phase 4 dispatcher goroutine, which re-evaluates the
 		// blocked-jobs stream whenever a printer becomes available. No
 		// dispatcher subscribes yet in Phase 3 -- PUBLISH with zero
 		// subscribers is a harmless no-op.
 		h.Redis.Publish(ctx, "mailbox:"+mailboxID+":available", "1")
+	}
+}
+
+// mirrorLiveness best-effort updates the durable ops-dashboard mirror
+// (mailboxes.status + last_heartbeat_at, plans/08-data-models.md) from a
+// register or state frame. Live routing reads the Redis cache; this row exists
+// only so the ops dashboard (Phase 9) can show a real last-heartbeat time, so a
+// failed or skipped update is logged, never fatal to the link. A nil Queries
+// (the register/state-only test hub) disables it, mirroring the DeleteBlob
+// nil-guard.
+func (h *Hub) mirrorLiveness(ctx context.Context, mailboxID, status string) {
+	if h.Queries == nil {
+		return
+	}
+	id, err := uuid.Parse(mailboxID)
+	if err != nil {
+		log.Printf("printer-link: mirror liveness: invalid mailbox id %q: %v", mailboxID, err)
+		return
+	}
+	if err := h.Queries.UpdateMailboxLiveness(ctx, db.UpdateMailboxLivenessParams{ID: id, Status: status}); err != nil {
+		log.Printf("printer-link: mailbox %s: mirror liveness: %v", mailboxID, err)
 	}
 }
 
