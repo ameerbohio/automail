@@ -391,3 +391,47 @@ func writeSSE(w http.ResponseWriter, flusher http.Flusher, ev streamEvent) bool 
 	flusher.Flush()
 	return true
 }
+
+type historyJob struct {
+	JobID       string  `json:"job_id"`
+	Status      string  `json:"status"`
+	PageCount   int32   `json:"page_count"`
+	CreatedAt   string  `json:"created_at"`
+	DeliveredAt *string `json:"delivered_at,omitempty"`
+}
+
+// ListMyJobs handles GET /jobs (authenticated). Returns the caller's own jobs,
+// newest first -- the account-flow counterpart to the guest's saved
+// guest_token: a logged-in sender sees all their jobs without holding any
+// token. Metadata only: never encrypted_key or blob_ref (zero-knowledge,
+// plans/02-security.md; the query itself does not select them). requireAuth
+// gates the route, so a missing sender here is a defensive 401.
+func (s *Server) ListMyJobs(w http.ResponseWriter, r *http.Request) {
+	senderID, ok := authctx.SenderID(r.Context())
+	if !ok {
+		WriteError(w, http.StatusUnauthorized, "authentication required", "UNAUTHORIZED")
+		return
+	}
+
+	rows, err := s.Queries.GetJobsBySender(r.Context(), uuid.NullUUID{UUID: senderID, Valid: true})
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "could not list jobs", "INTERNAL")
+		return
+	}
+
+	jobs := make([]historyJob, 0, len(rows))
+	for _, row := range rows {
+		hj := historyJob{
+			JobID:     row.ID.String(),
+			Status:    row.Status,
+			PageCount: row.PageCount,
+			CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
+		}
+		if row.DeliveredAt.Valid {
+			delivered := row.DeliveredAt.Time.UTC().Format(time.RFC3339)
+			hj.DeliveredAt = &delivered
+		}
+		jobs = append(jobs, hj)
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+}

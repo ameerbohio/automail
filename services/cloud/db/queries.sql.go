@@ -63,6 +63,55 @@ func (q *Queries) GetJobForStream(ctx context.Context, id uuid.UUID) (GetJobForS
 	return i, err
 }
 
+const getJobsBySender = `-- name: GetJobsBySender :many
+SELECT id, status, page_count, created_at, delivered_at
+FROM jobs
+WHERE sender_id = $1
+ORDER BY created_at DESC
+LIMIT 200
+`
+
+type GetJobsBySenderRow struct {
+	ID          uuid.UUID    `json:"id"`
+	Status      string       `json:"status"`
+	PageCount   int32        `json:"page_count"`
+	CreatedAt   time.Time    `json:"created_at"`
+	DeliveredAt sql.NullTime `json:"delivered_at"`
+}
+
+// Phase 8 /history (GET /jobs, authenticated). A sender's own jobs, newest
+// first. Metadata only -- deliberately never selects encrypted_key or blob_ref
+// (zero-knowledge; plans/02-security.md). Bounded LIMIT keeps the response
+// cheap at prototype scale.
+func (q *Queries) GetJobsBySender(ctx context.Context, senderID uuid.NullUUID) ([]GetJobsBySenderRow, error) {
+	rows, err := q.db.QueryContext(ctx, getJobsBySender, senderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetJobsBySenderRow
+	for rows.Next() {
+		var i GetJobsBySenderRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.PageCount,
+			&i.CreatedAt,
+			&i.DeliveredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getSenderByEmail = `-- name: GetSenderByEmail :one
 SELECT id, email_enc, password_hash, role
 FROM senders
@@ -187,6 +236,47 @@ type InsertRefreshTokenParams struct {
 func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error {
 	_, err := q.db.ExecContext(ctx, insertRefreshToken, arg.SenderID, arg.TokenHash, arg.ExpiresAt)
 	return err
+}
+
+const insertSender = `-- name: InsertSender :one
+INSERT INTO senders (email_enc, name_enc, password_hash, role)
+VALUES (
+  pgp_sym_encrypt($1::text, $2),
+  pgp_sym_encrypt($3::text, $2),
+  $4,
+  'sender'
+)
+RETURNING id, role
+`
+
+type InsertSenderParams struct {
+	Email        string `json:"email"`
+	AppKey       string `json:"app_key"`
+	Name         string `json:"name"`
+	PasswordHash string `json:"password_hash"`
+}
+
+type InsertSenderRow struct {
+	ID   uuid.UUID `json:"id"`
+	Role string    `json:"role"`
+}
+
+// Phase 8 open registration (plans/09 POST /auth/register). email_enc and
+// name_enc are pgcrypto-encrypted PII like the other columns; because
+// pgp_sym_encrypt is non-deterministic there is no unique index on email_enc,
+// so the handler pre-checks GetSenderByEmail for duplicates (prototype scale --
+// a deterministic blind-index column would be the real fix). role is fixed to
+// 'sender' here and is never caller-supplied -- admin is not self-assignable.
+func (q *Queries) InsertSender(ctx context.Context, arg InsertSenderParams) (InsertSenderRow, error) {
+	row := q.db.QueryRowContext(ctx, insertSender,
+		arg.Email,
+		arg.AppKey,
+		arg.Name,
+		arg.PasswordHash,
+	)
+	var i InsertSenderRow
+	err := row.Scan(&i.ID, &i.Role)
+	return i, err
 }
 
 const lockJobForDispatch = `-- name: LockJobForDispatch :one

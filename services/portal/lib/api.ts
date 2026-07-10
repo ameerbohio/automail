@@ -83,15 +83,24 @@ export async function uploadBlob(
   }
 }
 
-export async function createJob(input: {
-  encrypted_key: string;
-  blob_ref: string;
-  recipient_id: string;
-  page_count: number;
-}): Promise<CreateJobResult> {
+// createJob submits the job. Pass an access token to submit as a logged-in
+// sender (job stored with sender_id, no guest_token issued); omit it for the
+// guest flow (server returns a one-time guest_token).
+export async function createJob(
+  input: {
+    encrypted_key: string;
+    blob_ref: string;
+    recipient_id: string;
+    page_count: number;
+  },
+  accessToken?: string | null,
+): Promise<CreateJobResult> {
   const res = await fetch("/api/jobs", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
     body: JSON.stringify(input),
   });
   return jsonOrThrow<CreateJobResult>(res);
