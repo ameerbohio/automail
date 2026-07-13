@@ -52,6 +52,7 @@ func backoffWithJitter(attempt int, maxBackoff time.Duration) time.Duration {
 	if base <= 0 {
 		return 0
 	}
+	// #nosec G404 -- math/rand is fine for reconnect-backoff jitter; it is not security-sensitive.
 	return time.Duration(rand.Int63n(int64(base)))
 }
 

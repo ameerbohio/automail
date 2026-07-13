@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sync/atomic"
+	"time"
 )
 
 // connected is flipped by the WebSocket client as it dials/reconnects.
@@ -34,7 +35,12 @@ func startHealthServer(addr string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthzHandler)
 	log.Printf("printer: healthcheck listener on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // bound slow-header (Slowloris) clients
+	}
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("healthcheck listener failed: %v", err)
 	}
 }

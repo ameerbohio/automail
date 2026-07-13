@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"automail/cloud/db"
 	"automail/cloud/dispatch"
@@ -27,7 +28,8 @@ import (
 )
 
 func loadRSAPrivateKey(path string) (*rsa.PrivateKey, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- path is the operator-configured JWT key path, not user input
+
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +49,8 @@ func loadRSAPrivateKey(path string) (*rsa.PrivateKey, error) {
 }
 
 func loadRSAPublicKey(path string) (*rsa.PublicKey, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- path is the operator-configured JWT key path, not user input
+
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +81,21 @@ func internalHealthzHandler(w http.ResponseWriter, r *http.Request) {
 // Phase 1 only proved certs verify end-to-end against /internal/healthz;
 // Phase 3 adds the real /internal/printer-link WebSocket upgrade onto the
 // same tls.Config and mux.
+// internalTLSConfig is the mTLS policy for the internal listener every printer
+// dials out to: a client MUST present a certificate signed by the internal CA
+// (tls.RequireAndVerifyClientCert), or the handshake is refused before any
+// handler runs. Extracted so the refusal is unit-testable
+// (security_invariants_test.go) — a regression to tls.NoClientCert must fail CI.
+func internalTLSConfig(caPool *x509.CertPool) *tls.Config {
+	return &tls.Config{
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  caPool,
+		MinVersion: tls.VersionTLS12,
+	}
+}
+
 func startMTLSServer(addr string, srv *handlers.Server) error {
-	caCert, err := os.ReadFile(os.Getenv("MTLS_CA_CERT_PATH"))
+	caCert, err := os.ReadFile(os.Getenv("MTLS_CA_CERT_PATH")) // #nosec G304 G703 -- operator-configured internal CA path (env), not user input
 	if err != nil {
 		return err
 	}
@@ -88,19 +104,15 @@ func startMTLSServer(addr string, srv *handlers.Server) error {
 		log.Fatal("failed to parse internal CA cert")
 	}
 
-	tlsConfig := &tls.Config{
-		ClientAuth: tls.RequireAndVerifyClientCert,
-		ClientCAs:  caPool,
-	}
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/internal/healthz", internalHealthzHandler)
 	mux.HandleFunc("GET /internal/printer-link", srv.PrinterLink)
 
 	server := &http.Server{
-		Addr:      addr,
-		Handler:   mux,
-		TLSConfig: tlsConfig,
+		Addr:              addr,
+		Handler:           mux,
+		TLSConfig:         internalTLSConfig(caPool),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Printf("cloud-server internal mTLS listener on %s", addr)
 	return server.ListenAndServeTLS(os.Getenv("MTLS_CLOUD_CERT_PATH"), os.Getenv("MTLS_CLOUD_KEY_PATH"))
@@ -235,7 +247,12 @@ func main() {
 
 	addr := ":" + port
 	log.Printf("cloud-server listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // bound slow-header (Slowloris) clients
+	}
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -18,4 +18,10 @@ fi
 # 3. go vet both modules.
 for m in services/cloud services/printer; do ( cd "$m" && go vet ./... ); done
 
+# 4. gitleaks on staged changes, if installed (CI is the hard gate; see .gitleaks.toml).
+if command -v gitleaks >/dev/null 2>&1; then
+	gitleaks protect --staged --no-banner -c .gitleaks.toml \
+		|| { echo "pre-commit: gitleaks flagged a staged secret" >&2; exit 1; }
+fi
+
 echo "pre-commit: ok"
