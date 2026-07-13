@@ -42,6 +42,18 @@ jobs:
       - name: coverage gate
         run: bash scripts/coverage.sh
 
+  fuzz:
+    name: Fuzz (short budget)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/cloud/go.mod
+      # Regression sweep against the committed seed corpus, not a soak.
+      - name: fuzz targets
+        run: FUZZTIME=20s make fuzz
+
   portal:
     name: Portal (typecheck/lint)
     runs-on: ubuntu-latest
