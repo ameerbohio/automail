@@ -48,8 +48,12 @@ test-race: ## Unit tests under the race detector (goroutine-heavy code)
 	@for m in $(GO_MODULES); do echo "race $$m"; (cd $$m && go test ./... -race -count=1); done
 
 .PHONY: cover
-cover: ## Coverage with a ratcheting floor (scripts/coverage.sh)
+cover: ## Go coverage with a ratcheting floor (scripts/coverage.sh)
 	@bash scripts/coverage.sh
+
+.PHONY: cover-portal
+cover-portal: ## Portal (Vitest) coverage with a ratcheting floor
+	@bash scripts/coverage-portal.sh
 
 .PHONY: fuzz
 fuzz: ## Run fuzz targets briefly (targets populated in Goal T4)
@@ -91,7 +95,7 @@ test-e2e: ## Full-stack / browser E2E — needs Docker (Goals T7/T8)
 	echo "e2e harness added in Goals T7/T8"
 
 .PHONY: ci
-ci: fmt-check lint test-race cover ## Docker-independent local CI gate
+ci: fmt-check lint test-race cover cover-portal ## Docker-independent local CI gate
 	@echo "✔ CI gates passed"
 
 .PHONY: hooks
