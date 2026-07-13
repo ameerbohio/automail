@@ -9,6 +9,11 @@ phases. It is designed to be executed by an agent via a single recurring goal pr
 > continue to the next goal. Stop when you hit a goal marked `blocked-on-owner`,
 > when a goal's acceptance criteria cannot be verified, or when all goals are done.
 
+There is a second, independent **Testing Track** further down (Goals T1–T12) for
+hardening the finished build to production quality locally. It has its own run
+prompt and is **not** gated by the CUPS `blocked-on-owner` goal — run it
+separately from the phase track above.
+
 ## Process Rules (apply to every goal)
 
 1. **Source of truth**: `plans/` is the specification. Read the relevant plan
@@ -221,6 +226,251 @@ Audit the repo:
    worked down, not just appended to.
 5. Report findings before fixing anything — list first, fix only clear-cut
    regressions, leave design questions for the owner.
+
+---
+
+# Testing Track — Production-Readiness (Local)
+
+An independent track that hardens the already-built system (phase Goals 0–5) to
+production quality using only the local WSL2 + Docker environment. The full
+specification is [docs/testing-plan.md](docs/testing-plan.md); each goal below
+implements exactly **one Part** of it. The north star: **every Part is
+demonstrable in an interview, and when the owner deploys to Proxmox it works on
+the first try** (Goal T12 closes that loop).
+
+Run it with its own recurring prompt (separate from the phase-track prompt above):
+
+> Read GOALS.md. In the **Testing Track**, find the first goal (T1, T2, …) whose
+> Status is `pending`. Read **only that goal's referenced Part** in
+> `docs/testing-plan.md` (not the whole doc). Implement it, verify its
+> Acceptance, mark it `done`, append a Status Log entry, then **stop** — one goal
+> per run. Do not continue to the next testing goal in the same run.
+
+## Testing Track Process Rules (apply to every T-goal)
+
+1. **One Part per run, fresh context.** Each goal is sized to be completed in a
+   single agent invocation without accumulating cross-Part context. **Do not**
+   batch multiple T-goals into one run — starting cold per goal is the point
+   (keeps context small so quality does not degrade). Read only the one Part the
+   goal names, plus the specific source files it touches.
+2. **`docs/testing-plan.md` is the spec.** The goal bodies here are pointers; that
+   doc's Part has the tasks, the "Why it matters", and the **Verify:** line that
+   defines done. Do not restate it — read it.
+3. **Never weaken the product to make a test pass.** Tests adapt to the code, not
+   the reverse. The security invariants in the phase-track Process Rules (§3) are
+   still non-negotiable — a testing goal may *assert* them but must never relax
+   them.
+4. **Each goal ends in one commit** (clean subject + body, no AI co-author
+   trailer) and a Status Log row. New tooling (Vitest, Playwright, k6,
+   testcontainers, gosec/gitleaks) is added in the goal that first needs it.
+5. **Verification is real**: the new tests must actually run green in this
+   environment, or the goal records precisely why they can't (e.g. Docker down)
+   and stays `pending` — same honesty bar as the phase track.
+6. **Study doc**: Part 9 (Goal T11) adds `docs/study/17-testing-strategy.md`;
+   earlier goals that introduce a non-trivial concept (fuzzing, contract testing,
+   chaos) get a short note appended there or a pointer in
+   `docs/study/00-interview-pending-questions.md`.
+
+Execution order is already the recommended sequence from the plan
+(0 → 3 → 6 → 1 → 2 → 4 → 5 → 7 → 8 → 9, then deploy parity).
+
+---
+
+## Goal T1 — Part 0: CI foundation, Makefile & gates
+
+**Status:** pending
+
+Implement Part 0 of `docs/testing-plan.md`: a `Makefile` (`test-unit`,
+`test-integration`, `test-e2e`, `test-race`, `lint`, `cover`, `fuzz`, `ci`),
+`go test ./... -race` wired in, a coverage floor that ratchets (start at the
+current number), and `.github/workflows/ci.yml` running Go build+vet+race+cover
+for both services plus portal lint/`tsc --noEmit`. Optional pre-commit hook.
+
+**Acceptance (plan Verify):** `make ci` passes locally; the workflow passes on a
+pushed branch; an introduced data race fails `test-race`; a coverage drop below
+the floor fails the build. One commit.
+
+---
+
+## Goal T2 — Part 3: Cross-language crypto contract (highest priority)
+
+**Status:** pending
+
+Implement Part 3: prove `portal/lib/encrypt.ts` (browser encrypt) and
+`printer/crypto.go` (decrypt) agree byte-for-byte, not just each against OpenSSL.
+Committed non-production RSA fixture; a Node/Vitest test emits an `{encrypted_key,
+iv, ciphertext}` vector, a Go test decrypts it to the exact input; a `make
+crypto-contract` target regenerates + re-verifies; tamper (one-bit flip) is
+rejected, never partially decrypted.
+
+**Acceptance (plan Verify):** `make crypto-contract` green — browser-produced
+vector decrypts to the original bytes in the printer; a tampered vector fails with
+an auth error, no crash, no partial plaintext. One commit.
+
+---
+
+## Goal T3 — Part 6: Security invariants as executable guards + scanning
+
+**Status:** pending
+
+Implement Part 6: turn the CLAUDE.md / `plans/02-security.md` non-negotiables into
+build-failing tests — cloud never logs/forwards `encrypted_key` except to the
+printer link; no plaintext PDF ever hits disk and `/dev/shm` is empty post-
+delivery; the internal printer-link WebSocket **rejects** a certless / wrong-CA
+client (the refusal is the property); passphrase/key zeroization guarded. Add
+`govulncheck`, `gosec`, `osv-scanner`/`npm audit`, and `gitleaks` to CI.
+
+**Acceptance (plan Verify):** each invariant test fails when the invariant is
+deliberately violated and passes otherwise; all scanners run clean in CI. One
+commit.
+
+---
+
+## Goal T4 — Part 1: Unit hardening — fuzz + race + edge tables
+
+**Status:** pending
+
+Implement Part 1: add nasty-row table cases to the existing pure logic
+(eligibility, backoff bounds, JWT claims, PKCS7, guest-token hash); add Go native
+`FuzzFrameUnmarshal` (both frame parsers) and `FuzzDecryptDocument`, seeded from
+the OpenSSL interop vectors; stand up Vitest tooling in `services/portal`.
+
+**Acceptance (plan Verify):** `-fuzztime=30s` finds no crashers on either frame
+parser or `DecryptDocument`; new edge tables green; `vitest` runs in the portal.
+One commit.
+
+---
+
+## Goal T5 — Part 2: Integration tests against real dependencies
+
+**Status:** pending
+
+Implement Part 2 with `testcontainers-go` (or a `docker-compose.test.yml` +
+`//go:build integration`): real Postgres (schema applies; audit trigger actually
+blocks `DELETE FROM audit_events`; `SELECT FOR UPDATE NOWAIT` errors under
+contention, no hang), real Redis (Streams `XADD`/`XREADGROUP`/`XACK` +
+`XAUTOCLAIM` reclaim + cross-connection pub/sub), real MinIO (presigned PUT/GET
+round-trips ciphertext; cloud never reads blob bytes).
+
+**Acceptance (plan Verify):** `make test-integration` boots the containers, all
+suites pass, and a torn-down container yields a clean explained failure, not a
+hang. One commit.
+
+---
+
+## Goal T6 — Part 4a: Portal unit tests (Vitest)
+
+**Status:** pending
+
+First half of Part 4: Vitest unit coverage for `lib/encrypt.ts` (chunking / IV
+handling) and the thin Next.js API proxy routes (correct forwarding, no auth
+leakage, guest-vs-authenticated path selection). Reuses the Vitest tooling from
+Goal T4.
+
+**Acceptance:** `vitest run` green in `services/portal`; the encrypt and proxy
+units cover the happy path plus malformed input; coverage counted toward the
+portal floor. One commit.
+
+---
+
+## Goal T7 — Part 4b: Portal browser E2E (Playwright)
+
+**Status:** pending
+
+Second half of Part 4: Playwright against the compose stack — guest flow
+(encrypt → upload → submit → token → `/track` status transitions over SSE),
+account flow (register → logged-in submit → `/history`; guest job absent from
+history), admin flow (job visible in `/admin/jobs`; non-admin JWT refused). Assert
+the intercepted upload body to MinIO is ciphertext.
+
+**Acceptance (plan Verify):** `make test-e2e` runs Playwright headless against
+`docker-compose up`; guest, account, and admin journeys pass; the
+upload-is-ciphertext assertion holds. One commit.
+
+---
+
+## Goal T8 — Part 5: Full-system E2E (assembled product)
+
+**Status:** pending
+
+Implement Part 5: one driver test through the whole real stack (portal → cloud →
+Redis dispatch → printer decrypt → dev-mode print → status to browser), asserting
+the end-to-end status transition **and** that `/dev/shm` is clean after
+`delivered`. Include the two-node case (`--scale cloud-server=2`): dispatch fan-in
+from the non-owner node and SSE status fan-out both hold.
+
+**Acceptance (plan Verify):** `make test-e2e-full` boots the stack, runs a real
+encrypted job to `delivered`, confirms `/dev/shm` empty, passes the two-node
+fan-in/fan-out case. One commit.
+
+---
+
+## Goal T9 — Part 7: Resilience & chaos
+
+**Status:** pending
+
+Implement Part 7 as a scripted `make chaos`: kill the printer mid-session (backoff
+reconnect, in-flight jobs re-queue); kill the owning cloud node (`XAUTOCLAIM`
+reclaims, dispatch resumes on the survivor); bounce Redis/Postgres (reconnect, no
+double-print via `NOWAIT`, no silent drop); backpressure (N jobs while printer
+offline all drain exactly once).
+
+**Acceptance (plan Verify):** `make chaos` kills each component in turn; every job
+reaches a terminal state exactly once; logs show reconnect, not crash. One commit.
+
+---
+
+## Goal T10 — Part 8: Performance & load (k6)
+
+**Status:** pending
+
+Implement Part 8: k6 scripts for job-submission throughput (p95 + error rate,
+find the knee), SSE fan-out (many subscribers on one job — goroutine/memory stays
+bounded), and dispatch throughput (consumer-group lag bounded). Commit a baseline
+for regression detection; watch pprof under load.
+
+**Acceptance (plan Verify):** `make load` produces a report; a committed baseline
+exists; a deliberate unbounded-goroutine/N+1 regression is visible against it. One
+commit.
+
+---
+
+## Goal T11 — Part 9: Pre-production gates & study doc
+
+**Status:** pending
+
+Implement Part 9: assert structured logs carry correlation IDs (job_id /
+mailbox_id) with no secret ever logged; verify health/readiness endpoints; write
+`docs/runbook.md` (stuck job / disconnected printer / full Stream, each backed by
+a Goal T9 scenario); write `docs/release-checklist.md`; add
+`docs/study/17-testing-strategy.md` (pyramid, fakes-vs-real, how invariants are
+enforced).
+
+**Acceptance (plan Verify):** the release checklist walks top-to-bottom with every
+item mapping to a green command/test (except the physical-print step, which stays
+documented-as-blocked). One commit.
+
+---
+
+## Goal T12 — Deployment parity & Proxmox first-deploy smoke
+
+**Status:** pending
+
+Not in the plan doc — closes the owner's "works immediately on Proxmox" goal.
+Compare the local compose env against the Proxmox+Docker target and eliminate the
+drift that breaks a first deploy: pin/verify base images and arch; confirm the
+`DEV_MODE=false` path (real `lp`, `cups-client` in the printer image — see
+`docs/cups-host-setup.md`) builds and starts even if the physical print step stays
+owner-blocked; document exact secret/cert provisioning (`.env`, `*.pem`, `certs/`)
+for the host; verify Traefik host rules and volume mounts (`/dev/shm`, CUPS
+socket) resolve on the target; add a `make deploy-smoke` that runs the Part 5 E2E
+against a production-profile compose (`DEV_MODE=false` everywhere except the CUPS
+call). Produce `docs/deploy-checklist.md` — the ordered steps for a clean first
+Proxmox bring-up.
+
+**Acceptance:** `make deploy-smoke` passes against the production-profile stack
+locally (physical print excepted); `docs/deploy-checklist.md` lists every host
+prerequisite and secret so the first Proxmox deploy has no surprises. One commit.
 
 ---
 
