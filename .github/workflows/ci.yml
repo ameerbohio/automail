@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go ${{ matrix.module }} (build/vet/fmt/race)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [cloud, printer]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/${{ matrix.module }}/go.mod
+          cache-dependency-path: services/${{ matrix.module }}/go.sum
+      - name: build & vet
+        working-directory: services/${{ matrix.module }}
+        run: go build ./... && go vet ./...
+      - name: gofmt
+        working-directory: services/${{ matrix.module }}
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: race
+        working-directory: services/${{ matrix.module }}
+        run: go test ./... -race -count=1
+
+  coverage:
+    name: Coverage floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/cloud/go.mod
+      - name: coverage gate
+        run: bash scripts/coverage.sh
+
+  portal:
+    name: Portal (typecheck/lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: services/portal/package-lock.json
+      - name: install
+        working-directory: services/portal
+        run: npm ci
+      - name: typecheck
+        working-directory: services/portal
+        run: npx tsc --noEmit
+      - name: lint (once ESLint is configured — Goal T6)
+        working-directory: services/portal
+        run: |
+          if ls .eslintrc* eslint.config.* >/dev/null 2>&1; then npx next lint; \
+          else echo "next lint skipped: ESLint config lands in Goal T6"; fi
+
+  integration:
+    name: Integration (real deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/cloud/go.mod
+      # GitHub runners provide Docker, so testcontainers-go works here.
+      # No -tags=integration tests exist until Goal T5; this is a no-op until then.
+      - name: integration suite
+        run: make test-integration

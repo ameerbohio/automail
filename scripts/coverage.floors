@@ -1,0 +1,5 @@
+# Ratcheting coverage floors (percent of statements, tested packages only).
+# Raise these when coverage improves; never lower them. See scripts/coverage.sh.
+# module   floor
+cloud      17.5
+printer    50.3

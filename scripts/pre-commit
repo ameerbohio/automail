@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Automail pre-commit hook. Install with `make hooks`.
+# Fast, local guards only — the full gate is `make ci`.
+set -euo pipefail
+
+# 1. Refuse to commit secrets (mirrors .gitignore; a belt-and-suspenders guard).
+if git diff --cached --name-only | grep -nE '(^|/)\.env$|\.pem$|(^|/)certs/'; then
+	echo "pre-commit: refusing to commit secrets (.env / *.pem / certs/)" >&2
+	exit 1
+fi
+
+# 2. gofmt must be clean.
+bad=$(gofmt -l services/cloud services/printer)
+if [ -n "$bad" ]; then
+	echo "pre-commit: gofmt needed:" >&2; echo "$bad" >&2; exit 1
+fi
+
+# 3. go vet both modules.
+for m in services/cloud services/printer; do ( cd "$m" && go vet ./... ); done
+
+echo "pre-commit: ok"
