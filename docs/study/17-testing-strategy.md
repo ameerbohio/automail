@@ -26,11 +26,34 @@ still exercise the real sqlc query layer and Redis command paths. That proves ou
 code calls the right methods.
 
 What a fake *cannot* prove is that Postgres actually honors `SELECT FOR UPDATE
-NOWAIT`, that a Redis Streams consumer group survives a crash and gets reclaimed by
-`XAUTOCLAIM`, or that MinIO server-side-encrypts a blob. Those behaviors get
-promoted to **real dependencies via testcontainers** (Part 2). Being able to name
-exactly which behaviors you moved fake → real, and why, is the senior signal — not
-"I used mocks" or "I used real everything."
+NOWAIT`, that a Redis Streams consumer group survives a crash, or that a pre-signed
+MinIO URL round-trips bytes the cloud never touches. Those behaviors are promoted to
+**real dependencies via `testcontainers-go`** (Part 2, `integration_*_test.go`,
+build tag `integration`, run by `make test-integration`). Each suite spins its own
+ephemeral container and tears it down via `t.Cleanup`, so the tests stay hermetic
+despite using real servers. The exact behaviors moved fake → real:
+
+- **Postgres** — `schema.sql` applies clean and pgcrypto round-trips; the
+  `audit_immutable` trigger genuinely rejects `DELETE`/`UPDATE` on `audit_events`
+  (prose promise → executable guard); `LockJobForDispatch` returns `55P03`
+  *immediately* under contention instead of blocking (the whole point of `NOWAIT`),
+  and a terminal job is not claimable.
+- **Redis** — the `XADD → XREADGROUP(">") → XACK` cycle empties the PEL; an
+  un-ACKed entry is reclaimed by `XAUTOCLAIM` under a *different* consumer (the
+  node-crash recovery path); pub/sub and pattern (`PSUBSCRIBE`) delivery cross a
+  *separate connection* — the fan-out that lets a job claimed on a non-owner node
+  still reach the owner.
+- **MinIO** — pre-signed PUT then GET round-trips ciphertext with the cloud never in
+  the byte path (a companion **static AST guard**, `blob_readpath_test.go`, fails the
+  build if any cloud code calls `GetObject`/`PutObject`); `RemoveBlob` deletes.
+
+Being able to name exactly which behaviors you moved fake → real, and why, is the
+senior signal — not "I used mocks" or "I used real everything."
+
+The teardown case earns its own assertion: killing a container mid-test must produce
+a **prompt, explained error, not a hang** (`TestIntegration_TornDownContainerFailsCleanly`
+bounds the call with a context and an outer timer). A dependency that dies should
+surface fast, not wedge a goroutine.
 
 ## Adversarial input: fuzzing
 
