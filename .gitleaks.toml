@@ -14,4 +14,6 @@ paths = [
   '''testdata/crypto-contract/fixture\.json''',
   # Dummy base64 payloads in printer frame-parsing tests (e.g. "base64ciphertext").
   '''services/printer/frames_test\.go''',
+  # Dummy opaque-passthrough marker in the proxy unit test (not a credential).
+  '''services/portal/lib/proxy\.test\.ts''',
 ]
