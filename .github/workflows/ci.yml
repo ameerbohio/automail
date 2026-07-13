@@ -64,6 +64,26 @@ jobs:
           if ls .eslintrc* eslint.config.* >/dev/null 2>&1; then npx next lint; \
           else echo "next lint skipped: ESLint config lands in Goal T6"; fi
 
+  crypto-contract:
+    name: Crypto contract (browser <-> printer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/printer/go.mod
+          cache-dependency-path: services/printer/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: services/portal/package-lock.json
+      - name: install portal deps
+        working-directory: services/portal
+        run: npm ci
+      - name: regenerate & verify the cross-language crypto contract
+        run: make crypto-contract
+
   integration:
     name: Integration (real deps)
     runs-on: ubuntu-latest
