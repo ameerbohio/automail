@@ -70,11 +70,13 @@ jobs:
       - name: typecheck
         working-directory: services/portal
         run: npx tsc --noEmit
-      - name: lint (once ESLint is configured — Goal T6)
+      - name: unit tests + coverage floor
+        run: make cover-portal
+      - name: lint (once ESLint is configured)
         working-directory: services/portal
         run: |
           if ls .eslintrc* eslint.config.* >/dev/null 2>&1; then npx next lint; \
-          else echo "next lint skipped: ESLint config lands in Goal T6"; fi
+          else echo "next lint skipped: ESLint config not yet added"; fi
 
   crypto-contract:
     name: Crypto contract (browser <-> printer)
