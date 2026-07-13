@@ -55,6 +55,15 @@ cover: ## Coverage with a ratcheting floor (scripts/coverage.sh)
 fuzz: ## Run fuzz targets briefly (targets populated in Goal T4)
 	@bash scripts/fuzz.sh
 
+.PHONY: crypto-contract
+crypto-contract: ## Cross-language crypto contract (browser <-> printer), regenerated
+	@echo "1/3 Go encrypts a guard vector for the browser…"
+	@(cd $(PRINTER) && go test -tags=contract -run '^TestContractGoEncryptForBrowser$$' -count=1 .)
+	@echo "2/3 Browser encrypts the production vector + decrypts the guard vector…"
+	@(cd $(PORTAL) && npx --no-install vitest run --config vitest.contract.config.ts)
+	@echo "3/3 Printer decrypts the browser vector byte-for-byte + rejects tampering…"
+	@(cd $(PRINTER) && go test -tags=contract -run '^TestContractPrinterDecryptsBrowser$$' -count=1 -v .)
+
 .PHONY: test-integration
 test-integration: ## Integration vs real Postgres/Redis/MinIO — needs Docker (Goal T5)
 	@if ! docker info >/dev/null 2>&1; then \
