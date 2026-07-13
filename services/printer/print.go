@@ -73,6 +73,8 @@ var tmpfsDir = "/dev/shm"
 // printDocument hands a file to CUPS. A package var so tests exercise the
 // pipeline without a real printer; the real path shells out to lp.
 var printDocument = func(printerName, path string) error {
+	// #nosec G204 -- printerName is operator config ($PRINTER_NAME), path is our
+	// own /dev/shm tmpfs file; neither is user-controlled.
 	return exec.Command("lp", "-d", printerName, path).Run()
 }
 

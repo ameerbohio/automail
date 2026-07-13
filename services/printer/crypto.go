@@ -6,7 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- SHA-1 only as a PBES2/PBKDF2 PRF option (RFC 8018), never for hashing
 	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -64,6 +65,12 @@ func (s *Server) AdminJobs(w http.ResponseWriter, r *http.Request) {
 		perPage = maxPerPage
 	}
 	offset := (page - 1) * perPage
+	// Clamp so a hand-crafted ?page= can't overflow the int32 RowOffset below
+	// (a negative offset would make Postgres reject the query). math.MaxInt32
+	// rows is already far past any real admin page.
+	if offset > math.MaxInt32 {
+		offset = math.MaxInt32
+	}
 
 	rows, err := s.Queries.AdminListJobs(r.Context(), db.AdminListJobsParams{
 		Status:    status,

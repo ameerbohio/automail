@@ -84,6 +84,32 @@ jobs:
       - name: regenerate & verify the cross-language crypto contract
         run: make crypto-contract
 
+  security:
+    name: Security scanners (govulncheck, gosec, gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so gitleaks can scan every commit
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/cloud/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: services/portal/package-lock.json
+      - name: install portal deps (for npm audit)
+        working-directory: services/portal
+        run: npm ci
+      - name: install scanners
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          go install github.com/zricethezav/gitleaks/v8@latest
+      - name: run scanners
+        run: make scan
+
   integration:
     name: Integration (real deps)
     runs-on: ubuntu-latest

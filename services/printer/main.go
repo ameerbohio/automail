@@ -57,7 +57,7 @@ func loadDocKey(keyPath string) (*printerKey, error) {
 	passBytes := []byte(pass)
 	defer zeroBytes(passBytes)
 
-	pemBytes, err := os.ReadFile(keyPath)
+	pemBytes, err := os.ReadFile(keyPath) // #nosec G304 -- operator-configured printer key path, not user input
 	if err != nil {
 		return nil, err
 	}

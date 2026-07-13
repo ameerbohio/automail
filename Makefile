@@ -64,6 +64,20 @@ crypto-contract: ## Cross-language crypto contract (browser <-> printer), regene
 	@echo "3/3 Printer decrypts the browser vector byte-for-byte + rejects tampering…"
 	@(cd $(PRINTER) && go test -tags=contract -run '^TestContractPrinterDecryptsBrowser$$' -count=1 -v .)
 
+.PHONY: scan
+scan: ## Security scanners: govulncheck + gosec + gitleaks (npm audit is informational)
+	@command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@latest
+	@command -v gosec       >/dev/null || go install github.com/securego/gosec/v2/cmd/gosec@latest
+	@command -v gitleaks    >/dev/null || go install github.com/zricethezav/gitleaks/v8@latest
+	@echo "── govulncheck (Go stdlib + dep CVEs, reachability) ──"
+	@for m in $(GO_MODULES); do echo "$$m:"; (cd $$m && govulncheck ./...); done
+	@echo "── gosec (SAST) ── excludes: -exclude-generated (sqlc files); G104 unhandled-err + G706 log-injection (low-value, noisy). Intentional cases are annotated inline with justified #nosec."
+	@for m in $(GO_MODULES); do echo "$$m:"; (cd $$m && gosec -quiet -exclude-generated -exclude=G104,G706 ./...); done
+	@echo "── gitleaks (secrets in git history; test fixtures allowlisted in .gitleaks.toml) ──"
+	@gitleaks git --no-banner -c .gitleaks.toml
+	@echo "── npm audit (portal, INFORMATIONAL) ── next@14.2.5 has advisories needing an owner-approved dependency bump; not a blocking gate."
+	@(cd $(PORTAL) && npm audit --omit=dev || true)
+
 .PHONY: test-integration
 test-integration: ## Integration vs real Postgres/Redis/MinIO — needs Docker (Goal T5)
 	@if ! docker info >/dev/null 2>&1; then \

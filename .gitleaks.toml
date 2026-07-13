@@ -1,0 +1,17 @@
+# gitleaks config (Testing Goal T3 / Part 6). Extends the default ruleset and
+# allowlists ONLY known test fixtures / dummy test data — never real secrets.
+# Real secrets (.env, *.pem, certs/) are gitignored and additionally blocked by
+# the pre-commit hook (scripts/pre-commit); this scanner is the CI backstop.
+title = "Automail gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and dummy test data, not real credentials"
+paths = [
+  # NON-PRODUCTION RSA-4096 keypair used only by the crypto-contract test (T2).
+  '''testdata/crypto-contract/fixture\.json''',
+  # Dummy base64 payloads in printer frame-parsing tests (e.g. "base64ciphertext").
+  '''services/printer/frames_test\.go''',
+]
