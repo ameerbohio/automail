@@ -119,7 +119,7 @@ func TestHandleDispatch_DeliversAndWipes(t *testing.T) {
 		}
 	}}
 
-	state := newSlotState()
+	state := newSlotState("slot-1")
 	frame := Frame{Type: "dispatch", JobID: jobID, EncryptedKey: encB64, BlobURL: "https://minio/blob"}
 	handleDispatch(context.Background(), frame, config{DevMode: false, PrinterName: "TestPrinter"}, state, pk, sink.send)
 
@@ -163,7 +163,7 @@ func TestHandleDispatch_DevModeSkipsLP(t *testing.T) {
 	}
 
 	sink := &frameSink{}
-	state := newSlotState()
+	state := newSlotState("slot-1")
 	const jobID = "job-dev"
 	frame := Frame{Type: "dispatch", JobID: jobID, EncryptedKey: encB64, BlobURL: "x"}
 	handleDispatch(context.Background(), frame, config{DevMode: true}, state, pk, sink.send)
@@ -195,7 +195,7 @@ func TestHandleDispatch_DecryptFailureReportsFailed(t *testing.T) {
 	sink := &frameSink{}
 	const jobID = "job-fail"
 	frame := Frame{Type: "dispatch", JobID: jobID, EncryptedKey: encB64, BlobURL: "x"}
-	handleDispatch(context.Background(), frame, config{DevMode: false}, newSlotState(), pk, sink.send)
+	handleDispatch(context.Background(), frame, config{DevMode: false}, newSlotState("slot-1"), pk, sink.send)
 
 	got := sink.types()
 	if len(got) != 2 || got[0] != "status/printing" || got[1] != "status/failed" {

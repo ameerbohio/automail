@@ -2,5 +2,5 @@
 # Raise these when coverage improves; never lower them. See scripts/coverage.sh.
 # module   floor
 cloud      18.5
-printer    53.3
+printer    57.8
 portal     39.4

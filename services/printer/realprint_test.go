@@ -54,7 +54,7 @@ func TestRealPrint_EndToEnd(t *testing.T) {
 
 	sink := &frameSink{}
 	frame := Frame{Type: "dispatch", JobID: jobID, EncryptedKey: encB64, BlobURL: "https://minio/blob"}
-	handleDispatch(context.Background(), frame, config{DevMode: false, PrinterName: printer}, newSlotState(), pk, sink.send)
+	handleDispatch(context.Background(), frame, config{DevMode: false, PrinterName: printer}, newSlotState("slot-1"), pk, sink.send)
 
 	got := sink.types()
 	if len(got) < 2 || got[1] != "status/delivered" {

@@ -24,11 +24,30 @@ type Server struct {
 	SQLDB   *sql.DB
 	Redis   *redis.Client
 	Minio   *minio.Client
-	AppKey  string // pgcrypto symmetric key for PII columns
+	// UploadPresigner signs the browser-facing PUT URL. It is usually the same
+	// client as Minio, but in deployments where object storage has a separate
+	// public endpoint (the browser cannot reach the internal `minio:9000`
+	// service name, only a public host), this is configured against that public
+	// endpoint so the SigV4 host in the signed URL matches what the browser
+	// sends. Server-side blob ops (BlobExists, RemoveBlob, the dispatch read
+	// URL the in-network printer fetches) always use the internal Minio client.
+	// If nil, callers fall back to Minio.
+	UploadPresigner *minio.Client
+	AppKey          string // pgcrypto symmetric key for PII columns
 
 	JWTPriv *rsa.PrivateKey
 	JWTPub  *rsa.PublicKey
 
 	Hub        *link.Hub     // printer-link connection registry + dispatch routing (Phase 3)
 	Dispatcher dispatch.Deps // immediate-dispatch dependencies, used by CreateJob (Phase 4)
+}
+
+// uploadPresigner returns the MinIO client used to sign the browser-facing
+// upload PUT URL: the dedicated public-endpoint client when configured,
+// otherwise the internal client. Server-side blob ops always use s.Minio.
+func (s *Server) uploadPresigner() *minio.Client {
+	if s.UploadPresigner != nil {
+		return s.UploadPresigner
+	}
+	return s.Minio
 }

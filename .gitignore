@@ -44,5 +44,11 @@ Thumbs.db
 # Vitest coverage output
 services/portal/coverage/
 
+# Playwright E2E artifacts (Goal T7)
+services/portal/test-results/
+services/portal/playwright-report/
+services/portal/blob-report/
+services/portal/.playwright/
+
 # Regenerated crypto-contract vectors (Goal T2); fixture.json IS committed
 testdata/crypto-contract/*.vector.json

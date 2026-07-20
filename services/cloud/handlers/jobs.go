@@ -43,7 +43,10 @@ func (s *Server) UploadURL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	const ttl = 15 * time.Minute
-	uploadURL, blobRef, err := minioclient.PresignedUploadURL(r.Context(), s.Minio, ttl)
+	// The browser PUTs directly to object storage, so the signed URL must use a
+	// host the browser can reach (see Server.UploadPresigner). Server-side blob
+	// ops keep using s.Minio (the internal endpoint).
+	uploadURL, blobRef, err := minioclient.PresignedUploadURL(r.Context(), s.uploadPresigner(), ttl)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "could not generate upload URL", "INTERNAL")
 		return

@@ -22,14 +22,16 @@ import (
 type slotState struct {
 	mu     sync.Mutex
 	status string // idle | printing
+	slotID string // the key occupancy is reported under (cfg.SlotID)
 	slots  map[string]SlotInfo
 }
 
-func newSlotState() *slotState {
+func newSlotState(slotID string) *slotState {
 	return &slotState{
 		status: "idle",
+		slotID: slotID,
 		slots: map[string]SlotInfo{
-			"slot-1": {Current: 0, Max: 5},
+			slotID: {Current: 0, Max: 5},
 		},
 	}
 }
@@ -123,7 +125,7 @@ func handleDispatch(ctx context.Context, frame Frame, cfg config, state *slotSta
 
 	send(Frame{Type: "status", JobID: frame.JobID, Status: "delivered"})
 
-	status, slots := state.recordDelivery("slot-1")
+	status, slots := state.recordDelivery(state.slotID)
 	send(Frame{Type: "state", Status: status, SlotOccupancy: slots})
 }
 

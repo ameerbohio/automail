@@ -30,7 +30,7 @@ func main() {
 		log.Fatalf("printer: load document private key: %v", err)
 	}
 
-	state := newSlotState()
+	state := newSlotState(cfg.SlotID)
 
 	go startHealthServer(cfg.ListenAddr)
 
