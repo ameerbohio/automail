@@ -1,9 +1,12 @@
 # CUPS Host Setup — Phase 10 (Real Printing)
 
-**Status: manual host setup required before Phase 10 can be implemented or
-verified.** This is the owner checklist referenced by GOALS.md Goal 6. It is a
-list of steps for a human to perform on the deployment host — the agent does not
-guess at or apply host configuration.
+**Status: host prerequisites DONE (2026-07-20) — the remaining work is the code
+side (Steps 2–4).** This is the owner checklist referenced by GOALS.md Goal 6.
+It is a list of steps for a human to perform on the deployment host — the agent
+does not guess at or apply host configuration. The owner completed and verified
+Step 1 directly on the Proxmox VM (see the "Done" block below); Steps 2–5 (the
+container image, compose wiring, and `DEV_MODE=false` flip) are the code changes
+Goal 6 still covers.
 
 ## What is already done (in code)
 
@@ -27,33 +30,46 @@ image has no `lp` binary yet, and the Dockerfile itself says so).
 
 ---
 
-## Step 1 — Configure CUPS on the Proxmox VM host
+## Step 1 — Configure CUPS on the Proxmox VM host — ✅ DONE (2026-07-20)
 
-On the Linux host (the Proxmox VM that runs the Docker stack):
+Completed and verified by the owner on the Proxmox VM that runs the Docker
+stack. Confirmed configuration:
 
-1. Install CUPS server + client:
-   ```sh
-   sudo apt-get update && sudo apt-get install -y cups cups-client
-   ```
-2. Add the physical printer to CUPS (USB or network). Easiest via the web UI at
-   `https://localhost:631` → **Administration → Add Printer**, or with `lpadmin`:
-   ```sh
-   sudo lpadmin -p HP_LaserJet -E -v usb://... -m everywhere   # driver depends on the printer
-   ```
-   Replace `HP_LaserJet` with the queue name you choose — **this becomes
-   `PRINTER_NAME`**.
-3. Print a test page from the host to confirm the queue works **before**
-   involving the container:
-   ```sh
-   echo "automail test" | lp -d HP_LaserJet
-   ```
-4. Note the exact queue name:
-   ```sh
-   lpstat -p -d
-   ```
+- **Printer:** Canon imageCLASS **MF240 Series** (UFRII LT), USB-attached.
+- **Proxmox passthrough:** passed to the VM **by USB vendor:device ID
+  `04a9:27d2`** (not by physical port), so it survives being unplugged and
+  replugged.
+- **CUPS + `cups-client`** installed on the VM host.
+- **Queue name: `Canon_MF240`** — driverless **IPP-over-USB** via the `ipp-usb`
+  bridge, backed by the generic **`-m everywhere`** IPP driver. No Canon vendor
+  driver is needed.
+- **Verified with repeated real PDF print jobs** (not just attribute queries):
+  paper came out correctly multiple times in a row.
+- **`PRINTER_NAME=Canon_MF240`** is the confirmed value for Step 4 / `.env`.
 
-Do **not** proceed until the host itself prints. Every later step assumes a
-working host queue.
+The generic recipe (for a different host/printer) is still: install
+`cups cups-client`, add the queue (`lpadmin -p <name> -E -v <device-uri> -m
+everywhere`, or the `https://localhost:631` web UI), test it from the host
+(`echo test | lp -d <name>`), and read the exact queue name back with
+`lpstat -p -d`. Do not proceed to the container steps until the **host itself**
+prints — every later step assumes a working host queue.
+
+### Troubleshooting notes from this bring-up
+
+- **If this printer goes flaky, try this first (unconfirmed — not a required
+  procedure).** Early on the device was non-deterministic — it worked maybe 1
+  time in 5, sometimes returning a clean response and sometimes a bare "0 bytes
+  / internal-error". It became reliable after: power-cycling the printer, doing
+  a kernel-level USB deauthorize/reauthorize on the VM (toggling the device's
+  `.../authorized` flag in sysfs), and restarting `ipp-usb`. That sequence was
+  **not** rigorously isolated as the root cause — the flakiness might have
+  cleared on its own — so treat it as a first thing to try if the printer
+  misbehaves again, not as a documented fix.
+- **No `ipp-usb` quirks entry is needed for this model (confirmed).** A missing
+  quirks entry (mirroring the workaround `ipp-usb` ships for the Canon SELPHY
+  CP1500) was suspected, but ruled out with a real A/B test: with a test quirk
+  disabled, the reset/restart sequence still printed reliably. So no `ipp-usb`
+  quirks file edit is required for the MF240.
 
 ---
 
@@ -112,7 +128,7 @@ In `docker-compose.yml` (or `.env`) for the `printer` service:
 
 ```yaml
       DEV_MODE: "false"
-      PRINTER_NAME: "HP_LaserJet"     # exactly the queue name from Step 1
+      PRINTER_NAME: "Canon_MF240"     # exactly the queue name from Step 1
 ```
 
 `PRINTER_NAME` is already plumbed through (`services/printer/config.go`) and is
@@ -162,13 +178,13 @@ something to default silently. Whichever option is chosen should be recorded in
 
 ## Summary of changes required
 
-| Where | Change |
-|---|---|
-| Proxmox VM host | Install CUPS, add + test the physical printer queue |
-| `services/printer/Dockerfile` | `apk add --no-cache cups-client` in the final stage |
-| `docker-compose.yml` (printer) | Mount `/run/cups/cups.sock` **or** set `CUPS_SERVER` |
-| `docker-compose.yml` / `.env` | `DEV_MODE=false`, `PRINTER_NAME=<queue>` |
-| CUPS config (owner decision) | Spool-to-disk hardening per the security note |
+| Where | Change | Status |
+|---|---|---|
+| Proxmox VM host | Install CUPS, add + test the physical printer queue (`Canon_MF240`) | ✅ done 2026-07-20 |
+| `services/printer/Dockerfile` | `apk add --no-cache cups-client` in the final stage | pending (Goal 6) |
+| `docker-compose.yml` (printer) | Mount `/run/cups/cups.sock` **or** set `CUPS_SERVER` | pending (Goal 6) |
+| `docker-compose.yml` / `.env` | `DEV_MODE=false`, `PRINTER_NAME=Canon_MF240` | pending (Goal 6) |
+| CUPS config (owner decision) | Spool-to-disk hardening per the security note | pending (owner decision) |
 
 No changes to `print.go`'s logic are required — the `lp` invocation, tmpfs
 write, and unlink-before-delivered are already implemented and unit-tested.
