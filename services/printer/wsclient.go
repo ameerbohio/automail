@@ -104,7 +104,7 @@ func connectAndServe(ctx context.Context, cfg config, state *slotState, key *pri
 	}
 
 	errCh := make(chan error, 2)
-	go func() { errCh <- runKeepalive(connCtx, conn, cfg.HeartbeatInterval) }()
+	go func() { errCh <- runKeepalive(connCtx, conn, cfg.HeartbeatInterval, state, send) }()
 	go func() { errCh <- readLoop(connCtx, conn, cfg, state, key, send) }()
 
 	err = <-errCh

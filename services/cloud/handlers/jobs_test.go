@@ -1,6 +1,26 @@
 package handlers
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/minio/minio-go/v7"
+)
+
+// TestUploadPresignerSelection locks the split-endpoint rule: the browser-facing
+// upload URL is signed by the dedicated public-endpoint client when one is
+// configured, and falls back to the internal client otherwise. Server-side blob
+// ops (BlobExists, RemoveBlob) always use s.Minio regardless.
+func TestUploadPresignerSelection(t *testing.T) {
+	internal := &minio.Client{}
+	public := &minio.Client{}
+
+	if got := (&Server{Minio: internal}).uploadPresigner(); got != internal {
+		t.Fatalf("with no public endpoint, presigner should be the internal client")
+	}
+	if got := (&Server{Minio: internal, UploadPresigner: public}).uploadPresigner(); got != public {
+		t.Fatalf("with a public endpoint, presigner should be the public client")
+	}
+}
 
 // TestGuestTokenHashRoundTrip locks the invariant that a token issued at
 // job creation (newGuestToken, POST /jobs) verifies against the stored

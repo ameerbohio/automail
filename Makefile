@@ -89,10 +89,10 @@ test-integration: ## Integration vs real Postgres/Redis/MinIO — needs Docker (
 	for m in $(GO_MODULES); do (cd $$m && go test -tags=integration ./... -count=1); done
 
 .PHONY: test-e2e
-test-e2e: ## Full-stack / browser E2E — needs Docker (Goals T7/T8)
+test-e2e: ## Portal browser E2E (Playwright vs a clean compose stack) — needs Docker (Goal T7)
 	@if ! docker info >/dev/null 2>&1; then \
-		echo "⚠ test-e2e skipped: no Docker daemon (populated in Goals T7/T8)"; exit 0; fi; \
-	echo "e2e harness added in Goals T7/T8"
+		echo "⚠ test-e2e skipped: no Docker daemon (Goal T7 needs the compose stack)"; exit 0; fi; \
+	bash scripts/e2e/run.sh
 
 .PHONY: ci
 ci: fmt-check lint test-race cover cover-portal ## Docker-independent local CI gate

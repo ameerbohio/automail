@@ -156,6 +156,31 @@ func main() {
 		log.Fatalf("minio bucket: %v", err)
 	}
 
+	// Optional public object-storage endpoint for browser-facing pre-signed
+	// upload URLs. When MINIO_ENDPOINT is an internal service name the browser
+	// cannot resolve (e.g. `minio:9000`), set MINIO_PUBLIC_ENDPOINT to a host
+	// the browser can reach; only the upload PUT URL is signed with it. All
+	// server-side blob ops keep using minioClient. Defaults to minioClient.
+	uploadPresigner := minioClient
+	if pub := os.Getenv("MINIO_PUBLIC_ENDPOINT"); pub != "" {
+		// Region is set explicitly so pre-signing stays a pure offline SigV4
+		// operation: without it a cold client resolves the bucket's region by
+		// calling GetBucketLocation against this (browser-only) endpoint, which
+		// the cloud server cannot reach. MinIO's default region is us-east-1.
+		region := os.Getenv("MINIO_REGION")
+		if region == "" {
+			region = "us-east-1"
+		}
+		uploadPresigner, err = minio.New(pub, &minio.Options{
+			Creds:  credentials.NewStaticV4(mustEnv("MINIO_ACCESS_KEY"), mustEnv("MINIO_SECRET_KEY"), ""),
+			Secure: os.Getenv("MINIO_PUBLIC_SECURE") == "true",
+			Region: region,
+		})
+		if err != nil {
+			log.Fatalf("minio public client: %v", err)
+		}
+	}
+
 	jwtPriv, err := loadRSAPrivateKey(mustEnv("JWT_PRIVATE_KEY_PATH"))
 	if err != nil {
 		log.Fatalf("JWT private key: %v", err)
@@ -180,15 +205,16 @@ func main() {
 		return minioclient.RemoveBlob(ctx, minioClient, blobRef)
 	}
 	srv := &handlers.Server{
-		Queries:    queries,
-		SQLDB:      sqlDB,
-		Redis:      rdb,
-		Minio:      minioClient,
-		AppKey:     mustEnv("APP_ENCRYPTION_KEY"),
-		JWTPriv:    jwtPriv,
-		JWTPub:     jwtPub,
-		Hub:        hub,
-		Dispatcher: dispatchDeps,
+		Queries:         queries,
+		SQLDB:           sqlDB,
+		Redis:           rdb,
+		Minio:           minioClient,
+		UploadPresigner: uploadPresigner,
+		AppKey:          mustEnv("APP_ENCRYPTION_KEY"),
+		JWTPriv:         jwtPriv,
+		JWTPub:          jwtPub,
+		Hub:             hub,
+		Dispatcher:      dispatchDeps,
 	}
 
 	// nodeID identifies this process as a Redis Streams consumer

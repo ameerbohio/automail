@@ -88,6 +88,27 @@ Answer: _(to be filled in)_
 
 ---
 
+## OWNER DECISION — printer keepalive should refresh the liveness cache (Goal T7)
+
+**Q: The dispatch-liveness cache `mailbox:<id>:state` has a 90s TTL, and
+plans/05 frames "TTL expiry is the offline signal." But the printer's keepalive
+sent only WebSocket *pings*, which never refresh that cache — so a
+connected-but-idle printer dropped out of the dispatchable set after 90s and
+jobs queued forever. T7's E2E surfaced this. I changed the keepalive to also
+re-send a `state` frame each tick (30s < 90s), so a live socket keeps the cache
+warm; plans/04 is titled "Keepalive *and State Reporting*," which supports this.
+Confirm this is the intended model, and reconcile the wording in plans/05 (TTL =
+offline) with plans/04 (keepalive reports state). Alternative designs: refresh
+the TTL on the cloud side when a pong arrives (keeps the printer dumber), or
+shorten/lengthen the TTL relative to the heartbeat interval.**
+*Context: this is a printer+cloud change made inside the portal-E2E goal because
+it blocked the acceptance criteria — a clear-cut dispatch-liveness regression,
+not a portal concern. Flagged here for owner sign-off since it touches the
+distributed-systems design, not just tests. See docs/study/17 "Browser E2E".*
+Answer: _(to be filled in)_
+
+---
+
 ## Why keep the RSA key resident but zero the passphrase?
 
 **Q: Phase 6 zeroes the key passphrase seconds after startup but leaves the RSA private key sitting in RAM for the whole process lifetime. Isn't the private key the more sensitive secret? Why the asymmetry?**

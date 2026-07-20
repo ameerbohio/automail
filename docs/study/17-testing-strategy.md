@@ -94,6 +94,48 @@ model is *enforced*, not aspirational.
   `npm audit` is informational; accepted findings live in
   [../accepted-risks.md](../accepted-risks.md).
 
+## Browser E2E: proving the zero-knowledge claim from the client side
+
+The top of the pyramid (Part 4b / `make test-e2e`) drives a real Chromium
+against the whole assembled stack over `docker-compose` — portal → cloud →
+Redis dispatch → printer decrypt → SSE status — for the three journeys a user
+actually takes: guest submit-and-track, account history, and the admin
+dashboard. Two ideas make it worth more than the sum of its unit tests:
+
+- **The ciphertext-on-wire assertion.** The guest test embeds a unique plaintext
+  marker in the PDF, then intercepts the browser's `PUT` to object storage and
+  asserts the bytes are *not* the plaintext (no marker, no `%PDF` magic, not
+  equal to the input). That is the project's whole thesis — "the server only
+  ever stores ciphertext" — demonstrated from the client, which is more
+  convincing than any diagram. It works because encryption happens in the tab
+  (Web Crypto) before the direct-to-storage upload the cloud never touches.
+- **Split object-storage endpoint.** The browser can't resolve the internal
+  `minio:9000` service name, and a SigV4 URL binds the host it's signed for, so
+  the upload URL must be signed for a host the browser reaches. The cloud signs
+  it with a dedicated public-endpoint client (`MINIO_PUBLIC_ENDPOINT`) while all
+  *server-side* blob ops keep the internal client — the real internal-vs-public
+  S3 endpoint pattern, not a test hack.
+
+**Two real bugs this layer caught** (the payoff of testing the assembled product,
+not just the parts):
+
+1. **Idle-printer liveness.** The keepalive sent WebSocket *pings*, but the
+   cloud's dispatch-eligibility cache (`mailbox:<id>:state`, 90s TTL) is only
+   refreshed by register/`state` frames. A connected-but-idle printer silently
+   fell out of the dispatchable set after 90s. Fix: the keepalive now also
+   re-sends a `state` frame each tick (plans/04 is literally titled "Keepalive
+   *and State Reporting*"). Unit tests never saw it because they used fakes with
+   matching state already seeded.
+2. **Slot-identity contract.** The dev printer reported occupancy under the
+   literal key `"slot-1"`, but eligibility looks the slot up by the DB
+   `mailbox_slots.id` (plans/04: `slot_occupancy` is keyed by `<slot_id>`), so
+   the lookup never matched and every job queued forever. Fix: the printer's
+   slot id is now configuration (`SLOT_ID`, like `MAILBOX_ID`), set to the real
+   slot UUID in a deployment.
+
+Both are classic "each service is individually correct, the *seam* between them
+isn't" bugs — exactly what an end-to-end test exists to find.
+
 ## What's proven locally vs. what a real deployment adds
 
 All of the above runs on one laptop. What it deliberately *doesn't* reproduce:

@@ -12,7 +12,13 @@ import (
 // config file, no flags -- env vars are enough for a single-process
 // service with this few knobs.
 type config struct {
-	MailboxID         string
+	MailboxID string
+	// SlotID is the identifier this unit's single slot reports occupancy
+	// under. plans/04-printer-microservice.md: slot_occupancy is keyed by
+	// "<slot_id>", and the cloud's dispatch eligibility check looks the slot
+	// up by the DB mailbox_slots.id -- so a real deployment sets this to that
+	// UUID (like MAILBOX_ID). Defaults to "slot-1" for standalone/dev.
+	SlotID            string
 	CloudServerWSURL  string
 	MTLSCACertPath    string
 	MTLSCertPath      string
@@ -55,8 +61,13 @@ func loadConfig() config {
 	if listenAddr == "" {
 		listenAddr = ":8444"
 	}
+	slotID := os.Getenv("SLOT_ID")
+	if slotID == "" {
+		slotID = "slot-1"
+	}
 	return config{
 		MailboxID:         mustEnv("MAILBOX_ID"),
+		SlotID:            slotID,
 		CloudServerWSURL:  mustEnv("CLOUD_SERVER_WS_URL"),
 		MTLSCACertPath:    mustEnv("MTLS_CA_CERT_PATH"),
 		MTLSCertPath:      mustEnv("MTLS_CERT_PATH"),

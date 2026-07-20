@@ -1,0 +1,49 @@
+# E2E override for the Playwright browser suite (Goal T7 / testing-plan Part 4b).
+# Use with: docker compose -f docker-compose.yml -f docker-compose.e2e.yml up
+#
+# What this changes vs the base stack, and why:
+#   - Publishes the portal on http://localhost:3000 and MinIO on
+#     http://localhost:9000 so the Playwright browser (running on the host) can
+#     reach them WITHOUT the Traefik TLS edge. http://localhost is a browser
+#     "secure context", so Web Crypto (crypto.subtle) and Secure cookies still
+#     work, and there is no self-signed-cert / mixed-content friction to fight.
+#     The mTLS printer <-> cloud hop is untouched (still on the internal network).
+#   - Points the cloud server's *upload* pre-signer at localhost:9000
+#     (MINIO_PUBLIC_ENDPOINT) so the SigV4 host in the signed PUT URL matches
+#     the host the browser actually connects to. Server-side blob ops still use
+#     the internal minio:9000 client. See handlers.Server.UploadPresigner.
+#   - Opens MinIO CORS so the browser's cross-origin (localhost:3000 ->
+#     localhost:9000) pre-signed PUT is allowed.
+#
+# The full-stack / Traefik / two-node case is Goal T8 (Part 5), not this file.
+
+services:
+  minio:
+    environment:
+      # Allow the browser origin (the portal) to issue the cross-origin
+      # pre-signed PUT. Prototype scope: any origin.
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
+    ports:
+      - "9000:9000"
+
+  cloud-server:
+    # cloud-server fatals if Postgres/Redis/MinIO aren't up yet (EnsureBucket on
+    # boot). depends_on only orders container *start*, not readiness, so on a
+    # fast `up` it can lose the race; restart until its dependencies answer.
+    restart: on-failure
+    environment:
+      # Browser-reachable object-storage host for the pre-signed upload URL.
+      MINIO_PUBLIC_ENDPOINT: "localhost:9000"
+      MINIO_PUBLIC_SECURE: "false"
+
+  printer:
+    environment:
+      # The dev printer reports occupancy under this slot id; it must equal the
+      # seeded mailbox_slots.id (scripts/e2e/seed.sh) so the cloud's dispatch
+      # eligibility check finds the slot. plans/04: slot_occupancy is keyed by
+      # "<slot_id>".
+      SLOT_ID: "22222222-2222-2222-2222-222222222222"
+
+  portal:
+    ports:
+      - "3000:3000"
