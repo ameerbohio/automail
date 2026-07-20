@@ -190,17 +190,30 @@ status; a job submitted as a sender appears in the admin job list. One commit.
 
 ## Goal 6 — Phase 10 (stretch): Real CUPS Printing
 
-**Status:** blocked-on-owner
+**Status:** pending
 
-Requires physical hardware and host configuration the agent must not guess at:
-CUPS configured on the Proxmox VM host, the home printer shared, and the CUPS
-socket (or TCP CUPS) exposed to the printer container.
+**Host prerequisites are DONE** (owner completed them directly on the Proxmox VM
+on 2026-07-20; see `docs/cups-host-setup.md` Step 1): Canon imageCLASS MF240
+(USB, Proxmox passthrough by device ID `04a9:27d2`) added to host CUPS as queue
+**`Canon_MF240`** via driverless IPP-over-USB (`ipp-usb`, `-m everywhere`),
+verified with repeated real PDF prints. `PRINTER_NAME=Canon_MF240`.
 
-When unblocked: replace the `DEV_MODE` stub with the real
-`lp -d $PRINTER_NAME /dev/shm/automail-<job_id>.pdf` call, per Phase 10 of the
-roadmap. Until then, an agent reaching this goal should produce a precise,
-step-by-step list of the manual host setup required, write it to
-`docs/cups-host-setup.md`, and stop.
+The remaining work is the **code side** (its own implement → plan-checker →
+commit pass, not bundled with the status flip that recorded the host setup):
+
+1. `services/printer/Dockerfile` — add `cups-client` (`lp`) to the runtime image
+   (currently bare alpine with no `lp`).
+2. `docker-compose.yml` (printer) — expose the host CUPS to the container (mount
+   `/run/cups/cups.sock`, or set `CUPS_SERVER`) per `docs/cups-host-setup.md`
+   Step 3.
+3. Flip `DEV_MODE=false` and set `PRINTER_NAME=Canon_MF240` (Step 4). `print.go`
+   already contains the `lp -d $PRINTER_NAME /dev/shm/automail-<job_id>.pdf` call
+   — `DEV_MODE` only skips it — so no `print.go` logic change is needed.
+
+**Still an owner decision** (do not default silently): the CUPS spool-to-disk
+wrinkle vs. the RAM-only plaintext invariant (`PreserveJobFiles No` / tmpfs
+spool / accept bounded risk), to be reconciled with `plans/02-security.md` —
+see the security note in `docs/cups-host-setup.md`.
 
 **Acceptance (roadmap Verify):** paper comes out of the printer with the correct
 document content; `/dev/shm` is empty afterwards.
@@ -479,6 +492,7 @@ prerequisite and secret so the first Proxmox deploy has no surprises. One commit
 
 | Date | Goal | Commit | Outcome |
 |------|------|--------|---------|
+| 2026-07-20 | Goal 6 | _(this commit)_ | **UNBLOCKED — status/docs update only, no code.** Owner completed the Phase 10 host prerequisites directly on the Proxmox VM and reported them for the record. Canon imageCLASS MF240 (USB, Proxmox passthrough by device ID `04a9:27d2` so it survives replug) added to host CUPS as queue **`Canon_MF240`** via driverless IPP-over-USB (`ipp-usb`, generic `-m everywhere` driver — no Canon vendor driver), verified reliable across repeated real PDF prints; `PRINTER_NAME=Canon_MF240`. Recorded in `docs/cups-host-setup.md` Step 1 (marked ✅ done) with two notes: an early-flakiness troubleshooting tip (power-cycle + USB sysfs deauthorize/reauthorize + `ipp-usb` restart) written as an **unconfirmed** "try this first", NOT a root cause; and a **confirmed** A/B finding that no `ipp-usb` quirks entry is needed for this model. Flipped Goal 6 `blocked-on-owner` → `pending`. Per owner instruction the actual code side (Dockerfile `cups-client`, compose CUPS-socket wiring, `DEV_MODE=false`) was NOT implemented here — it runs as its own implement → plan-checker → commit pass. The CUPS spool-to-disk vs. RAM-only invariant remains an owner design decision (plans/02). |
 | 2026-07-05 | Goal 0 | 21af1f3 | Review fixes landed: XReadGroup Block:-1 (BLOCK 0 = wait forever), rune-safe maskName, requireAuth comment; both modules build/vet/test green. |
 | 2026-07-05 | Goal 1 | 69d11ba | Phase 5 SSE relay: /jobs/:id/stream with dual auth, job_id restored to wire format, terminal close, two-node fan-out test. plan-checker PASS. Browser Verify deferred: Docker unavailable in session; covered by in-process cross-node test. |
 | 2026-07-06 | Goal 2 | 9dedbdb | Phase 6 printer crypto: RSA-OAEP unwrap + AES-256-GCM decrypt in RAM, /dev/shm tmpfs, unlink-before-delivered, zero+GC; PBES2 PKCS#8 key load with hand-rolled PBKDF2 (no new dep), passphrase zeroed+env-unset; generic wire error (no oracle). Cloud: delete spent ciphertext on delivered (blob_ref only, never encrypted_key). plan-checker PASS (fixed GC-order nit + stale plans/04 dev-mode text). Browser/Docker E2E deferred; covered by full-pipeline unit test. |
