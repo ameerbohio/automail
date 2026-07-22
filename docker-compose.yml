@@ -20,7 +20,7 @@ services:
       - "--providers.file.watch=true"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
-      - "--entrypoints.websecure.http.tls.options=default@file"
+      - "--entrypoints.websecure.http.tls.options=default"
     ports:
       - "80:80"
       - "443:443"
@@ -142,13 +142,13 @@ services:
       - "traefik.http.routers.cloud-server-guest.rule=Host(`api.automail.local`) && (PathPrefix(`/jobs`) || PathPrefix(`/recipients`))"
       - "traefik.http.routers.cloud-server-guest.entrypoints=websecure"
       - "traefik.http.routers.cloud-server-guest.tls=true"
-      - "traefik.http.routers.cloud-server-guest.tls.options=default@file"
+      - "traefik.http.routers.cloud-server-guest.tls.options=default"
       - "traefik.http.routers.cloud-server-guest.service=cloud-server"
       - "traefik.http.routers.cloud-server-guest.middlewares=secure-headers@file,guest-ratelimit@file"
       - "traefik.http.routers.cloud-server.rule=Host(`api.automail.local`)"
       - "traefik.http.routers.cloud-server.entrypoints=websecure"
       - "traefik.http.routers.cloud-server.tls=true"
-      - "traefik.http.routers.cloud-server.tls.options=default@file"
+      - "traefik.http.routers.cloud-server.tls.options=default"
       - "traefik.http.routers.cloud-server.middlewares=secure-headers@file"
 
   printer:
@@ -204,7 +204,7 @@ services:
       - "traefik.http.routers.portal.rule=Host(`automail.local`)"
       - "traefik.http.routers.portal.entrypoints=websecure"
       - "traefik.http.routers.portal.tls=true"
-      - "traefik.http.routers.portal.tls.options=default@file"
+      - "traefik.http.routers.portal.tls.options=default"
       - "traefik.http.routers.portal.middlewares=secure-headers@file"
       - "traefik.http.services.portal.loadbalancer.server.port=3000"
 
