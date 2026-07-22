@@ -13,6 +13,7 @@ services:
     environment:
       - DOCKER_API_VERSION=1.46  # Forces Traefik to use a supported API version
     command:
+      - "--log.level=DEBUG"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.file.directory=/etc/traefik/dynamic"
