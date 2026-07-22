@@ -128,6 +128,8 @@ os.Remove(tmpfsPath)
 
 **tmpfs usage**: The decrypted PDF is written to `/dev/shm/automail-<job_id>.pdf` (an in-memory filesystem in Linux). This file never touches a persistent disk. It is unlinked immediately after CUPS accepts the job.
 
+**CUPS spool is also tmpfs**: When `lp` hands the job to the host `cupsd`, CUPS copies it into its spool directory (`/var/spool/cups`) while it queues/rasterizes. Deployment hosts mount `/var/spool/cups` on **tmpfs** (RAM-backed), so that copy is also memory-only and never reaches persistent disk — it stays inside the "plaintext only in RAM + tmpfs" invariant rather than being an accepted exception. This is a host prerequisite (see `docs/cups-host-setup.md`), enforced by the deployment, not by application code.
+
 **Dev mode**: In development, the file is written to the system temp directory and deleted immediately. A log line confirms deletion.
 
 ---
