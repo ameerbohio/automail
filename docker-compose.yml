@@ -116,7 +116,11 @@ services:
       MTLS_KEY_PATH: /certs/printer-key.pem
       HEARTBEAT_INTERVAL: "30"
       RECONNECT_MAX_BACKOFF: "30"
-      DEV_MODE: "true"
+      # Production values (Phase 10). DEV_MODE defaults to false so a real
+      # deploy prints; local dev/e2e set DEV_MODE=true in .env or the e2e
+      # override to skip the physical lp call. PRINTER_NAME is the host CUPS
+      # queue (docs/cups-host-setup.md Step 1).
+      DEV_MODE: "${DEV_MODE:-false}"
       LISTEN_ADDR: ":8444"
       # Document-decryption key (Phase 6). Required even in DEV_MODE: dev mode
       # still runs the full RSA/AES decrypt and only skips the physical lp
@@ -124,9 +128,14 @@ services:
       #   PRINTER_KEY_PASSPHRASE=... ./infra/certs/gen-printer-keys.sh
       PRINTER_PRIVATE_KEY_PATH: /certs/printer-private.pem
       PRINTER_KEY_PASSPHRASE: ${PRINTER_KEY_PASSPHRASE:-changeme-printer-passphrase}
-      PRINTER_NAME: ${PRINTER_NAME:-}
+      PRINTER_NAME: ${PRINTER_NAME:-Canon_MF240}
     volumes:
       - ./infra/certs:/certs:ro
+      # Phase 10: reach the host's cupsd so `lp` can print. The host mounts
+      # /var/spool/cups on tmpfs, so CUPS spool files stay RAM-backed and remain
+      # inside the "plaintext only in RAM+tmpfs" invariant (plans/02-security.md).
+      # Harmless in DEV_MODE (lp is never called). Some distros use /var/run/cups.
+      - /run/cups/cups.sock:/run/cups/cups.sock
     networks:
       - automail
     healthcheck:

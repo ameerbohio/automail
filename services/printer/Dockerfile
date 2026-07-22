@@ -5,10 +5,11 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/printer .
 
-# Phase 3 is dev-mode only (no CUPS/lp call -- see print.go), so a bare
-# alpine base is enough. Phase 6 (real printing) will need a base image
-# with cups-client installed for the lp command.
+# Phase 10 (real printing): cups-client provides `lp`, which print.go shells
+# out to when DEV_MODE=false. In dev mode `lp` is never called, but shipping it
+# in every image keeps one artifact for both modes.
 FROM alpine:3.19
+RUN apk add --no-cache cups-client
 COPY --from=build /out/printer /usr/local/bin/printer
 EXPOSE 8444
 ENTRYPOINT ["printer"]

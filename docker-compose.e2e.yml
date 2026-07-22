@@ -38,6 +38,8 @@ services:
 
   printer:
     environment:
+      # Hermetic E2E: never make the physical lp call (no printer on CI/WSL).
+      DEV_MODE: "true"
       # The dev printer reports occupancy under this slot id; it must equal the
       # seeded mailbox_slots.id (scripts/e2e/seed.sh) so the cloud's dispatch
       # eligibility check finds the slot. plans/04: slot_occupancy is keyed by
