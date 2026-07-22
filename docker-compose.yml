@@ -19,7 +19,7 @@ services:
       - "--providers.file.watch=true"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
-      - "--entrypoints.websecure.http.tls.options=default@file"
+      - "--entrypoints.websecure.http.tls.options=default"
     ports:
       - "80:80"
       - "443:443"
