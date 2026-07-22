@@ -182,6 +182,59 @@ there), which a browser going through one portal origin can't do; and the crypto
 the driver needs is byte-identical to the browser's, already proven equivalent by
 the Part 3 contract test, so nothing is lost by encrypting in Go.
 
+## Resilience & chaos: killing each moving part
+
+Everything above proves the system works when the parts stay up. `make chaos`
+(`scripts/e2e/chaos.sh` → `e2e/chaos_test.go`, build tag `chaos`) proves it
+*recovers* when they don't. It reuses the two-node full-system stack and, in one
+run, kills each moving part in turn — Redis, Postgres, the socket-owning cloud
+node, the printer — asserting two properties after every kill.
+
+**Exactly-once, read from the ledger, not the status.** The tempting assertion is
+"the job says delivered." The stronger one is: the append-only `audit_events`
+table holds *exactly one* `job_delivered` row for the job. Zero means the job
+vanished; two means it was double-printed. That table is the same immutable ledger
+the Part 2 integration test proved can't be `UPDATE`d or `DELETE`d, so a count
+against it is trustworthy in a way a mutable status column isn't. This is what
+turns "no double-print" from a hope into a test — the `SELECT FOR UPDATE NOWAIT`
+claim guard and the dispatcher's ACK-only-when-done discipline are what make the
+count come out at one.
+
+**Reconnect, not crash.** After each kill a *fresh* job flows to delivered — which
+is itself the proof the cloud re-established its Redis/Postgres pools, since those
+pools are the only way a job moves. On top of that the printer's dial loop must
+log backoff-and-retry (`reconnecting in …`), and no service log may carry a Go
+runtime crash marker (`panic:` / `fatal error:`). A logged *connection error*
+during a bounce is expected resilience, not a failure — only a crash marker fails
+the test.
+
+Two scenarios are worth calling out:
+
+- **Backpressure (printer offline).** Kill the printer, submit N jobs while it's
+  down. Each must return `"queued"` and land in the `jobs:pending` stream (with
+  the printer gone, `PUBLISH mailbox:<id>:dispatch` has zero receivers, so
+  dispatch reverts the claim and enqueues instead of writing to a dead socket).
+  Restart the printer; the whole backlog drains, each delivered exactly once,
+  `/dev/shm` clean. This is the queue earning its keep — the buffer that turns a
+  printer outage into latency instead of lost mail.
+- **Owner-node failover.** Stop the cloud node that holds the printer socket. The
+  survivor node keeps taking submissions; with no live socket anywhere they
+  enqueue rather than vanish (verified against `jobs:pending` depth). Bring the
+  owner back, the printer re-homes on it, and the backlog drains exactly once. An
+  honest boundary the test documents: because the printer only ever *dials* the
+  `cloud-server` alias, the socket can't fail *over* to the survivor in this
+  pinned topology — the survivor's role is to keep accepting and buffering work,
+  and the crashed node's un-ACKed stream entries are recovered by `XAUTOCLAIM`
+  (exercised directly in the Part 2 Redis integration test, where a second
+  consumer reclaims a dead consumer's PEL entry).
+
+One design constraint the suite has to respect: the dev printer reports a single
+slot whose occupancy only ever *increments* in-process and resets only when the
+printer process restarts. So the scenarios are ordered and budgeted — the three
+that leave the printer running stay under its slot cap, and the printer-restart
+scenario (which resets it) runs last. That's a note-to-self about *test* fixtures,
+not the product; a real mailbox's slot empties when mail is collected.
+
 ## What's proven locally vs. what a real deployment adds
 
 All of the above runs on one laptop. What it deliberately *doesn't* reproduce:
