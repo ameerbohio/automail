@@ -37,7 +37,7 @@ type PrinterState struct {
 // GetPrinterState wraps it with the Phase 2 always-idle default for the
 // dispatch path, which treats a missing key as an empty-but-usable printer.
 func LookupPrinterState(ctx context.Context, rdb *redis.Client, mailboxID string) (state PrinterState, found bool, err error) {
-	val, err := rdb.Get(ctx, "mailbox:"+mailboxID+":state").Result()
+	val, err := rdb.Get(ctx, KeyPrinterState(mailboxID)).Result()
 	if err == redis.Nil {
 		return PrinterState{}, false, nil
 	}
@@ -79,5 +79,5 @@ func SetPrinterState(ctx context.Context, rdb *redis.Client, mailboxID string, s
 	if err != nil {
 		return err
 	}
-	return rdb.Set(ctx, "mailbox:"+mailboxID+":state", val, printerStateTTL).Err()
+	return rdb.Set(ctx, KeyPrinterState(mailboxID), val, printerStateTTL).Err()
 }

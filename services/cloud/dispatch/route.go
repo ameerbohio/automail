@@ -239,7 +239,7 @@ func attemptDispatch(ctx context.Context, d Deps, f JobRef) (status string, err 
 		return "", err
 	}
 
-	receivers, err := d.Redis.Publish(ctx, "mailbox:"+f.MailboxID+":dispatch", payload).Result()
+	receivers, err := d.Redis.Publish(ctx, store.ChanDispatch(f.MailboxID), payload).Result()
 	if err != nil {
 		_ = revert(ctx, d.Queries, f.JobID)
 		return "", err

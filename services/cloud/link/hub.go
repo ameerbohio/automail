@@ -79,7 +79,7 @@ func (h *Hub) Accept(ctx context.Context, w http.ResponseWriter, r *http.Request
 	// dispatch subscription is guaranteed already active.
 	pumpCtx, cancelPump := context.WithCancel(ctx)
 	defer cancelPump()
-	sub := h.Redis.Subscribe(pumpCtx, "mailbox:"+reg.MailboxID+":dispatch")
+	sub := h.Redis.Subscribe(pumpCtx, store.ChanDispatch(reg.MailboxID))
 	defer sub.Close()
 	if _, err := sub.Receive(ctx); err != nil {
 		log.Printf("printer-link: mailbox %s: dispatch subscribe ack: %v", reg.MailboxID, err)
@@ -132,7 +132,7 @@ func (h *Hub) onState(ctx context.Context, mailboxID string, frame Frame) {
 		// blocked-jobs stream whenever a printer becomes available. No
 		// dispatcher subscribes yet in Phase 3 -- PUBLISH with zero
 		// subscribers is a harmless no-op.
-		h.Redis.Publish(ctx, "mailbox:"+mailboxID+":available", "1")
+		h.Redis.Publish(ctx, store.ChanAvailable(mailboxID), "1")
 	}
 }
 
@@ -185,7 +185,7 @@ func (h *Hub) onStatus(ctx context.Context, frame Frame) {
 	}
 
 	payload, _ := jsonStatusPayload(frame)
-	h.Redis.Publish(ctx, "job:"+jobID.String()+":status", payload)
+	h.Redis.Publish(ctx, store.ChanJobStatus(jobID.String()), payload)
 
 	// Delete the ciphertext AFTER the SSE publish so a slow or failed delete
 	// never delays the sender's status update. Keyed on job.BlobRef only --

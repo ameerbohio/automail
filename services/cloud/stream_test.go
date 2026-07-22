@@ -30,6 +30,7 @@ import (
 	"automail/cloud/handlers"
 	"automail/cloud/jwtutil"
 	"automail/cloud/link"
+	"automail/cloud/store"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
@@ -298,7 +299,7 @@ func TestStreamJob_RelayAddsJobIDBack(t *testing.T) {
 
 	// Publish exactly what link.Hub.onStatus publishes: status only, no
 	// job_id (link.jsonStatusPayload).
-	receivers, err := rdb.Publish(ctx, "job:"+jobID+":status", `{"status":"delivered"}`).Result()
+	receivers, err := rdb.Publish(ctx, store.ChanJobStatus(jobID), `{"status":"delivered"}`).Result()
 	if err != nil {
 		t.Fatalf("publish: %v", err)
 	}
@@ -335,7 +336,7 @@ func TestStreamJob_FailedStatusClosesWithError(t *testing.T) {
 		t.Fatalf("snapshot event = %s, want %s", got, want)
 	}
 
-	if _, err := rdb.Publish(ctx, "job:"+jobID+":status", `{"status":"failed","error":"paper jam"}`).Result(); err != nil {
+	if _, err := rdb.Publish(ctx, store.ChanJobStatus(jobID), `{"status":"failed","error":"paper jam"}`).Result(); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 

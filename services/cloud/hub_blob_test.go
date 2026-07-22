@@ -21,6 +21,7 @@ import (
 
 	"automail/cloud/db"
 	"automail/cloud/link"
+	"automail/cloud/store"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
@@ -166,7 +167,7 @@ func TestHubDeliveredWithoutDeleteBlobDoesNotPanic(t *testing.T) {
 
 	// Subscribe to the status channel so we can confirm delivery was relayed
 	// even though no blob deletion happens.
-	sub := rdb.Subscribe(ctx, "job:"+jobID+":status")
+	sub := rdb.Subscribe(ctx, store.ChanJobStatus(jobID))
 	defer sub.Close()
 	if _, err := sub.Receive(ctx); err != nil {
 		t.Fatalf("subscribe: %v", err)
