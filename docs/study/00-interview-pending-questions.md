@@ -139,3 +139,53 @@ is leak-free and correct — but a real scaling design decision, and the plan's
 own words describe option (b). Flagged for the owner rather than silently
 refactored (touches the SSE hot path). See docs/study/17 "Performance & load".*
 Answer: _(to be filled in)_
+
+---
+
+## OWNER DECISION — Redis runs unauthenticated (found by the Goal T12 deploy audit)
+
+**Q: `.env.example` has documented a `REDIS_PASSWORD` since the first commit, and
+`scripts/e2e/bootstrap.sh` writes one — but it is wired to nothing. The `redis`
+service starts without `--requirepass` and every consumer's `REDIS_URL`
+(`redis://redis:6379/0`) carries no credential. Redis is not published to the
+host, so today it is reachable only from the internal `automail` Docker network.
+Should we (a) leave it, on the grounds that the network boundary is the control
+and an attacker on that network already has the cloud server's certificates
+anyway, or (b) turn on `requirepass` and thread the credential through every
+consumer, on defence-in-depth grounds?**
+*Context: found auditing `.env.example` against reality for the T12 deploy
+checklist. The security concern is not really "is Redis exposed" — it is that a
+documented variable named `REDIS_PASSWORD` reads as evidence that Redis is
+authenticated, so an operator setting a strong value gets a false sense of the
+posture. Marked explicitly as not-wired-up in `.env.example` and in
+`docs/deploy-checklist.md` §2 rather than silently fixed, because turning it on
+touches every Redis consumer and is a posture call. Note the contrast worth
+being able to defend in an interview: this is the one internal hop that is NOT
+mutually authenticated, while the plans call for "mTLS on every internal hop."*
+Answer: _(to be filled in)_
+
+---
+
+## OWNER DECISION — CSP needs `script-src 'unsafe-inline'` for Next.js (Goal T12)
+
+**Q: `plans/02-security.md` §6 specifies `Content-Security-Policy: default-src
+'self'`. Enforced through Traefik on the production profile, that policy blocks
+Next.js App Router's inline RSC scripts (`self.__next_f.push(...)`), so the portal
+renders server-side, returns 200, and never hydrates — verified in Chromium: five
+CSP violations, zero API requests, the Search button inert. T12 unblocked it with
+`script-src 'self' 'unsafe-inline'`, which is a real weakening. Should we (a) keep
+`'unsafe-inline'`, on the grounds that the portal renders no user-supplied HTML
+and the E2EE design means the server never holds the document key anyway, or (b)
+generate a per-request nonce in Next middleware and emit the CSP from the app
+instead of from Traefik — strictly better, but it moves one security header out of
+the edge config into application code and needs the nonce threaded onto every
+inline script?**
+*Context: found by the Goal T12 deploy smoke, which is the first thing to drive
+the portal through the real Traefik edge (T7 publishes it directly and never sees
+these headers). Option (b) is the textbook answer. Worth being able to explain why
+`'unsafe-inline'` for `script-src` specifically defeats most of CSP's XSS value,
+and why `connect-src` and `default-src` staying strict still buys real
+exfiltration resistance. Also worth noting the deeper point: the plan's CSP was
+written before there was a Next.js app to serve, and nothing enforced it in
+between — a spec that was never exercised is a spec that was never true.*
+Answer: _(to be filled in)_

@@ -96,8 +96,11 @@ git clone <automail-repo-url> automail && cd automail
 ./infra/certs/gen-jwt-keys.sh
 # 3. Printer document-decryption keypair (RSA-4096, encrypted at rest)
 PRINTER_KEY_PASSPHRASE='<choose-a-strong-passphrase>' ./infra/certs/gen-printer-keys.sh
+# 4. Browser-facing edge TLS cert -- REQUIRED. Traefik runs with sniStrict, so
+#    without it every TLS handshake is hard-rejected (ERR_SSL_UNRECOGNIZED_NAME_ALERT).
+./infra/certs/gen-edge-certs.sh
 
-# 4. Environment
+# 5. Environment
 cp .env.example .env
 ```
 
@@ -124,13 +127,16 @@ or anything under `infra/certs/`.**
 Traefik routes by hostname, not path:
 - `automail.local` → the portal (web UI)
 - `api.automail.local` → the cloud API
+- `blob.automail.local` → object storage (the browser uploads the ciphertext
+  straight there via a pre-signed URL, so it must resolve too — see
+  [deploy-checklist.md §4](deploy-checklist.md))
 
 So the machine whose **browser** opens the app must resolve those names to
 `<VM_IP>`. Two options:
 - **Quick:** add to the *client* machine's hosts file
   (`C:\Windows\System32\drivers\etc\hosts` on Windows, `/etc/hosts` on Linux):
   ```
-  <VM_IP>  automail.local  api.automail.local
+  <VM_IP>  automail.local  api.automail.local  blob.automail.local
   ```
 - **Proper:** add both A records to your LAN DNS pointing at `<VM_IP>`.
 
@@ -191,6 +197,9 @@ absent while postgres/redis/printer/portal/traefik are up).
 To check a host's level directly: `/lib64/ld-linux-x86-64.so.2 --help | grep -A2 'Subdirectories'` (look for `x86-64-v2 (supported/unsupported)`), or inspect `/proc/cpuinfo` for the `sse4_2` and `popcnt` flags.
 
 ### Verify
+0. `make deploy-smoke` — automates every check below plus the edge TLS/SNI,
+   security-header and pre-signed-upload assertions. See
+   [deploy-checklist.md §7](deploy-checklist.md).
 1. Browse to `https://automail.local` → portal loads.
 2. Run the guest flow (upload a PDF → get a guest token → watch `/track` go
    `submitted → dispatching → printing → delivered`). In `DEV_MODE` the printer

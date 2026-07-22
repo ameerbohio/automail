@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"sort"
 	"time"
 
 	"automail/cloud/db"
@@ -293,9 +294,30 @@ func eligible(ctx context.Context, rdb *redis.Client, mailboxID, slotID string) 
 		// Unknown capacity for this slot -- treat as not dispatchable
 		// rather than assuming room, per store.GetPrinterState's doc
 		// comment on Phase 4's eligibility distinction.
+		//
+		// Log the keys the printer DID report. A live-but-misconfigured unit
+		// (printer's SLOT_ID != the mailbox_slots.id the job was routed to)
+		// is otherwise indistinguishable from a legitimately-full slot: every
+		// job just sits in `queued` with nothing in the logs. This is the
+		// single most likely first-deploy misconfiguration, so name it.
+		log.Printf("dispatch: mailbox %s reported no slot %s (reported slots: %v) -- "+
+			"if the printer is healthy, its SLOT_ID likely does not match mailbox_slots.id",
+			mailboxID, slotID, slotKeys(state.SlotOccupancy))
 		return false
 	}
 	return slot.Current < slot.Max
+}
+
+// slotKeys returns the slot ids a printer reported, sorted so the diagnostic
+// above is stable across log lines. Only ever holds slot identifiers -- never
+// occupancy values, and nothing job-related.
+func slotKeys(occ map[string]store.SlotState) []string {
+	keys := make([]string, 0, len(occ))
+	for k := range occ {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // claimOutcome is claimJob's result. claimed means this node committed

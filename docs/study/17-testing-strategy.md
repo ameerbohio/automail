@@ -288,6 +288,80 @@ with "permission denied" yet k6 still **exited 0**, so the real failure only
 appeared much later as a missing file. Both are now fixed at the source, and the
 run fails fast with a pointed message if the export goes missing again.
 
+## Deployment parity: testing the seams the test stacks remove (T12)
+
+Every suite above buys determinism by *changing the topology*. The browser E2E
+publishes the portal on `localhost:3000`, the full-system E2E publishes two cloud
+nodes on `:8080`/`:8081`, the load profile runs k6 inside the Docker network — all
+of them bypass the Traefik edge, because a self-signed TLS front door and
+hostname routing are friction a test does not want. That is a sound trade, and it
+has a cost that is easy to miss: **the parts of the system those overrides remove
+are never tested by anything.**
+
+That gap is not theoretical. Everything about the edge is production-only, and
+the first Proxmox bring-up hit failure after failure in exactly that band — a
+missing edge certificate against `sniStrict` (blanket TLS rejection), a Traefik
+image whose vendored Docker client could not negotiate an API version with a
+modern Engine (blanket 404, because every router is a Docker label). Fixing them
+one deploy-attempt at a time is the slow way to find out.
+
+So the deployment smoke inverts the usual override: it runs the **base compose
+unchanged** and drives everything through `https://api.automail.local`. The
+mechanism is worth stealing — Go's `http.Transport` lets you override
+`DialContext` while leaving the URL's hostname intact, which is `curl --resolve`
+in library form: SNI, the Host header, the router rule and `sniStrict` all behave
+exactly as in production, but the socket lands on whatever port Traefik is
+published on. The cert is pinned via `RootCAs` rather than waved through with
+`InsecureSkipVerify`, so "the edge serves the certificate we generated, for the
+name we asked for" becomes an assertion instead of an assumption. Every shared
+harness helper then drives real HTTPS URLs with no idea the edge exists.
+
+Writing it found four more production-only defects in one run, and their shape is
+the actual lesson — **none of them fails loudly, and none is in application
+code**:
+
+- **The pre-signed upload URL was signed against `minio:9000`**, a Docker-internal
+  name. By design the browser PUTs ciphertext straight to object storage, so the
+  guest flow died at its first step on any real deploy — and the server logged
+  nothing, because *handing out* the URL succeeded.
+- **`Content-Security-Policy: default-src 'self'` bricked the portal.** Next.js
+  App Router streams its RSC payload in inline `<script>` blocks; under that
+  policy all five are blocked. The SSR HTML still renders and still returns
+  `200`, so the page *looks* fine — but nothing hydrates, no handler binds, and
+  clicking Search fires zero requests. The same policy separately blocked the
+  cross-origin upload PUT.
+- **The rate limit throttled nobody.** `average: 20, period: 1m` read exactly like
+  the plan's "20 requests/min", but Traefik defaults `burst` to **1** — one
+  request per three seconds. Worse, the middleware was attached only to
+  `api.automail.local`, which *the browser never contacts*: the portal calls
+  same-origin `/api/*` and Next proxies it server-side, bypassing Traefik
+  entirely. So the spec'd control was both mistuned and mounted on the wrong door.
+- **The printer's `SLOT_ID` defaulted to the literal `"slot-1"`** while dispatch
+  eligibility looks slots up by their database UUID. Result: no eligible slot
+  ever, every job parked in `queued` forever, printer reporting healthy, nothing
+  logged as an error.
+
+The through-line: **a config default that is *wrong* is far more dangerous than
+one that is *missing***, because missing usually crashes at startup where you will
+see it. All four were silent by construction. Two also illustrate why a green test
+is not the same as a working system — a Go client executes no scripts and enforces
+no CSP, so the first version of the CSP assertion passed happily against a portal
+that was completely dead in Chromium. The fix was to assert the *parsed policy*
+(does `script-src` permit what Next emits, does `connect-src` name the upload
+origin) instead of a status code, and to write down plainly that only a real
+browser can catch a genuinely novel CSP break. Knowing what your assertion cannot
+see is part of writing it.
+
+The one durable production fix beyond the tests was making the silent case speak:
+dispatch now logs which slot ids the printer actually reported when the lookup
+misses, turning an unexplained hang into a one-line diagnosis.
+
+The checklist (`docs/deploy-checklist.md`) and the smoke script share a
+preflight, so the document cannot rot into aspiration: if a prerequisite is not
+really required, the script stops checking it; if it is, `make deploy-smoke` fails
+with the exact remediation command. Documentation that is also a test is the only
+kind that stays true.
+
 ## What's proven locally vs. what a real deployment adds
 
 All of the above runs on one laptop. What it deliberately *doesn't* reproduce:

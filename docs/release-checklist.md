@@ -14,7 +14,7 @@ are available; they are not skipped, they are deferred with a stated reason.
 | Unit tests under the race detector | `make test-race` | pass |
 | Security-invariant guards | included in `go test ./...` (mTLS refusal, no-log, tmpfs, passphrase) | pass |
 | Fuzz regression sweep | `make fuzz` (or `-fuzztime=30s` per target) | no crashers |
-| Go coverage ≥ ratcheting floor | `make cover` (cloud ≥18.5, printer ≥53.3) | ✔ |
+| Go coverage ≥ ratcheting floor | `make cover` (floors live in `scripts/coverage.floors`) | ✔ |
 | Portal typecheck | `npx tsc --noEmit` (in `services/portal`) | clean |
 | Portal unit coverage ≥ floor | `make cover-portal` (≥39.4) | ✔ |
 | Cross-language crypto contract | `make crypto-contract` | byte-for-byte + tamper reject |
@@ -42,7 +42,9 @@ The umbrella for the local set: **`make ci`** (fmt-check → lint → test-race 
 | Full-system E2E (encrypt→print→status, /dev/shm clean) | `make test-e2e-full` | ⛔ Docker (Goal T8) |
 | Resilience / chaos (reconnect, failover, exactly-once) | `make chaos` | ⛔ Docker (Goal T9) |
 | Load baseline within tolerance | `make load` | ⛔ Docker (Goal T10) |
-| `DEV_MODE=false` production-profile smoke | `make deploy-smoke` | ⛔ Docker (Goal T12) |
+| Production-profile smoke through the HTTPS edge | `make deploy-smoke` | ⛔ Docker (Goal T12) |
+| `DEV_MODE=false` printer starts and reaches a CUPS queue | on the CUPS host: `DEV_MODE=false docker compose up -d printer`, then `docker compose logs printer` | ⛔ hardware (needs a real cupsd; the smoke pins `DEV_MODE=true`) |
+| First-deploy host prerequisites walked | **[deploy-checklist.md](deploy-checklist.md)** top-to-bottom on the target host | ⛔ target host |
 | Correlation IDs present end-to-end in a live run | capture logs during E2E; assert `job_id`/`mailbox_id` present, no secret | ⛔ Docker (rides on T8) |
 | Physical print (paper out, `/dev/shm` empty) | submit a job on the mailbox host | ⛔ hardware — owner-blocked Phase 10 |
 

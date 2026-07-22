@@ -1,12 +1,20 @@
-//go:build e2e || chaos
+//go:build e2e || chaos || smoke
 
-// Shared harness for the full-system E2E (Goal T8, build tag `e2e`) and the
-// resilience/chaos suite (Goal T9, build tag `chaos`). Both drive the product's
-// real HTTP contract and the browser's exact crypto wire format -- with nothing
-// but the Go standard library -- against a live two-node compose stack that
-// scripts/e2e/{full,chaos}.sh bring up. Keeping the primitives here (encrypt,
-// submit, stream, docker control, /dev/shm inspection) lets the two suites stay
-// DRY without either importing the cloud/printer modules.
+// Shared harness for the full-system E2E (Goal T8, build tag `e2e`), the
+// resilience/chaos suite (Goal T9, build tag `chaos`) and the deployment-parity
+// smoke (Goal T12, build tag `smoke`). All three drive the product's real HTTP
+// contract and the browser's exact crypto wire format -- with nothing but the Go
+// standard library -- against a live compose stack that
+// scripts/e2e/{full,chaos}.sh and scripts/deploy/smoke.sh bring up. Keeping the
+// primitives here (encrypt, submit, stream, docker control, /dev/shm inspection)
+// lets the suites stay DRY without any of them importing the cloud/printer
+// modules.
+//
+// The helpers deliberately use http.DefaultClient rather than taking a client
+// argument: the smoke suite runs everything through the HTTPS edge instead of a
+// published port, and swaps in a transport that trusts the self-signed edge cert
+// and maps the routed hostnames to the published Traefik port (see
+// deploy_smoke_test.go's TestMain). That keeps this file protocol-agnostic.
 package e2e
 
 import (
@@ -287,18 +295,25 @@ func streamToTerminal(t *testing.T, baseURL, jobID, guestToken string, timeout t
 	return statuses
 }
 
-// composeArgs is the docker-compose invocation both suites use to reach the
-// running two-node stack (same project scripts/e2e/{full,chaos}.sh brought up).
-// E2E_REPO_ROOT pins the project directory so `exec`/`stop`/`start`/`restart`
-// target the same containers regardless of the test's cwd.
+// composeArgs is the docker-compose invocation the suites use to reach the
+// running stack (the same project the bring-up script created). E2E_REPO_ROOT
+// pins the project directory so `exec`/`stop`/`start`/`restart` target the same
+// containers regardless of the test's cwd. E2E_COMPOSE_OVERRIDE names the
+// override layered on the base file, so the smoke suite reaches its
+// production-profile project instead of the two-node one -- get this wrong and
+// `exec printer` silently addresses a different (or absent) container.
 func composeArgs(t *testing.T, extra ...string) []string {
 	t.Helper()
 	root := env(t, "E2E_REPO_ROOT")
+	override := os.Getenv("E2E_COMPOSE_OVERRIDE")
+	if override == "" {
+		override = "docker-compose.full.yml"
+	}
 	base := []string{
 		"compose",
 		"--project-directory", root,
 		"-f", root + "/docker-compose.yml",
-		"-f", root + "/docker-compose.full.yml",
+		"-f", root + "/" + override,
 	}
 	return append(base, extra...)
 }

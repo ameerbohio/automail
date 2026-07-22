@@ -1,0 +1,37 @@
+# Deployment-parity smoke override (Goal T12). Use with:
+#   make deploy-smoke        (or scripts/deploy/smoke.sh)
+#
+# The point of this file is what it does NOT change. Unlike docker-compose.e2e.yml
+# (Part 4b) and docker-compose.full.yml (Part 5), which publish services directly
+# on host ports and bypass the Traefik edge entirely, the deploy smoke runs the
+# *production profile*: the base docker-compose.yml as-is, reached only through
+# Traefik on the routed hostnames, with the real pre-signed-upload path and the
+# real secure-headers/TLS middleware in play. Those are exactly the seams no other
+# suite covers, and exactly where first-deploy bugs have actually shown up
+# (edge cert c8716b1, Traefik/Engine API negotiation ab4460a, and the three this
+# goal found: no browser-reachable object storage, a CSP that blocks the upload,
+# and a printer SLOT_ID that silently never matches).
+#
+# It therefore contains exactly two deviations from a real deploy, both forced by
+# the local host rather than chosen, and both asserted-around by the smoke test:
+#
+#   1. printer DEV_MODE=true -- the documented "everything except the CUPS call"
+#      exception. The dev host has no Canon MF240 and no cupsd; DEV_MODE skips
+#      ONLY the `lp` invocation, so the RSA/AES decrypt, the /dev/shm write, the
+#      unlink-before-callback and the zeroing all still run and are still
+#      asserted. Physical print stays owner-gated (roadmap Phase 10 / Goal 6).
+#
+#   2. printer SLOT_ID pinned to the seeded mailbox_slots.id, because
+#      scripts/e2e/seed.sh writes a fixed fixture UUID. On a real deploy this
+#      value comes from .env and must match the provisioned row -- which is the
+#      whole point of the drift this override makes explicit rather than hides.
+#
+# Traefik's host ports are NOT overridden here: the base compose already reads
+# TRAEFIK_HTTP_PORT / TRAEFIK_HTTPS_PORT, and scripts/deploy/smoke.sh sets them
+# when 80/443 are unavailable (they are on WSL2 -- Windows holds both).
+
+services:
+  printer:
+    environment:
+      DEV_MODE: "true"
+      SLOT_ID: "22222222-2222-2222-2222-222222222222"
