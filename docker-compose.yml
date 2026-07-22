@@ -41,6 +41,11 @@ services:
       - ./services/cloud/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     networks:
       - automail
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -48,6 +53,11 @@ services:
       - redis_data:/data
     networks:
       - automail
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   minio:
     # Pinned to a `-cpuv1` variant on purpose -- do NOT bump to :latest or a bare
@@ -75,13 +85,26 @@ services:
       - minio_data:/data
     networks:
       - automail
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   cloud-server:
     build: ./services/cloud
+    # Plain `depends_on: [minio]` only waits for the container to *start*,
+    # not for MinIO's server to accept connections -- EnsureBucket (main.go)
+    # fatals on the first connection-refused, crashing this container in the
+    # race. `condition: service_healthy` makes Compose block until each
+    # dependency's own healthcheck passes.
     depends_on:
-      - postgres
-      - redis
-      - minio
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
       PORT: 8080
       MTLS_PORT: 8443
