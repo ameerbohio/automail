@@ -62,7 +62,10 @@ export default function AdminJobs() {
 
   return (
     <main>
-      <h1>Jobs</h1>
+      <div className="page-head">
+        <h1>Jobs</h1>
+        <p className="muted">{total} total</p>
+      </div>
 
       <div className="filters">
         <label className="field" style={{ margin: 0 }}>
@@ -80,46 +83,61 @@ export default function AdminJobs() {
             ))}
           </select>
         </label>
-        <span className="muted">{total} total</span>
       </div>
 
-      {error && <p className="error">{error}</p>}
-      {loading && data === null && <p className="muted">Loading…</p>}
+      {error && <p className="callout">{error}</p>}
+      {loading && data === null && (
+        <div className="skeleton-stack" aria-hidden="true">
+          <div className="skeleton" />
+          <div className="skeleton" style={{ width: "88%" }} />
+          <div className="skeleton" style={{ width: "72%" }} />
+        </div>
+      )}
       {data && data.jobs.length === 0 && (
-        <p className="muted">No jobs match this filter.</p>
+        <div className="empty">
+          <p>No jobs match this filter.</p>
+        </div>
       )}
 
       {data && data.jobs.length > 0 && (
-        <table className="history">
-          <thead>
-            <tr>
-              <th>Job</th>
-              <th>Slot</th>
-              <th>Status</th>
-              <th>Pages</th>
-              <th>Submitted</th>
-              <th>Delivered</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.jobs.map((j) => (
-              <tr key={j.job_id}>
-                <td title={j.job_id}>{j.job_id.slice(0, 8)}…</td>
-                <td>{j.slot_number}</td>
-                <td>
-                  <StatusBadge status={j.status} />
-                </td>
-                <td>{j.page_count}</td>
-                <td>{new Date(j.created_at).toLocaleString()}</td>
-                <td>
-                  {j.delivered_at
-                    ? new Date(j.delivered_at).toLocaleString()
-                    : "—"}
-                </td>
+        <div className="table-card">
+          <table className="history">
+            <thead>
+              <tr>
+                <th>Job</th>
+                <th>Slot</th>
+                <th>Status</th>
+                <th>Pages</th>
+                <th>Submitted</th>
+                <th>Delivered</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.jobs.map((j) => (
+                <tr key={j.job_id}>
+                  {/* Truncated id with the full uuid on the title attribute --
+                      operators copy it out of the tooltip. */}
+                  <td className="cell-mono" data-label="Job" title={j.job_id}>
+                    {j.job_id.slice(0, 8)}…
+                  </td>
+                  <td data-label="Slot">{j.slot_number}</td>
+                  <td data-label="Status">
+                    <StatusBadge status={j.status} />
+                  </td>
+                  <td data-label="Pages">{j.page_count}</td>
+                  <td data-label="Submitted">
+                    {new Date(j.created_at).toLocaleString()}
+                  </td>
+                  <td data-label="Delivered">
+                    {j.delivered_at
+                      ? new Date(j.delivered_at).toLocaleString()
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <div className="pager">

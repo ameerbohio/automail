@@ -4,11 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { JobProgress, DeliveredStamp, isTerminal } from "../../journey";
+import { IconAlert } from "../../icons";
 
-const LADDER = ["submitted", "queued", "dispatching", "printing", "delivered"];
-
-function isTerminal(status: string): boolean {
-  return status === "delivered" || status === "failed";
+function stamp(): string {
+  return new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 export default function JobStatusPage() {
@@ -17,6 +21,7 @@ export default function JobStatusPage() {
   const { accessToken, loading, isAuthenticated } = useAuth();
   const router = useRouter();
   const [current, setCurrent] = useState<string | null>(null);
+  const [times, setTimes] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
@@ -41,6 +46,10 @@ export default function JobStatusPage() {
       try {
         const data = JSON.parse(ev.data) as { status: string; error?: string };
         setCurrent(data.status);
+        // Keep the first time we saw each status -- that is the arrival time.
+        setTimes((prev) =>
+          prev[data.status] ? prev : { ...prev, [data.status]: stamp() },
+        );
         if (data.status === "failed" && data.error) setError(data.error);
         if (isTerminal(data.status)) es.close();
       } catch {
@@ -60,46 +69,53 @@ export default function JobStatusPage() {
     };
   }, [loading, isAuthenticated, accessToken, jobId, router]);
 
-  const currentIndex = current ? LADDER.indexOf(current) : -1;
+  const delivered = current === "delivered";
+  const failed = current === "failed";
 
   return (
     <main className="wrap">
-      <h1>Job status</h1>
-      <p className="muted">
-        Job ID: <code>{jobId}</code>
+      <p className="eyebrow">Job</p>
+      <h1>In transit</h1>
+      <p className="muted" style={{ marginTop: "0.375rem" }}>
+        <code>{jobId}</code>
       </p>
 
       {current ? (
         <section className="status">
-          <p>
+          <p className="status-line">
+            <span
+              className={`live-dot${delivered ? " is-done" : ""}${failed ? " is-failed" : ""}`}
+              aria-hidden="true"
+            />
             Current status: <strong>{current}</strong>
-            {current === "delivered" && " ✓"}
-            {current === "failed" && " ✗"}
           </p>
-          <ol className="ladder">
-            {LADDER.map((s, i) => (
-              <li
-                key={s}
-                className={
-                  current === "failed"
-                    ? "pending"
-                    : i <= currentIndex
-                      ? "reached"
-                      : "pending"
-                }
-              >
-                {s}
-              </li>
-            ))}
-          </ol>
+
+          <JobProgress current={current} times={times} />
+
+          {delivered && <DeliveredStamp at={times["delivered"]} />}
         </section>
       ) : (
-        !error && <p className="muted">Connecting…</p>
+        // Before the first SSE frame lands, show the rail with nothing on it
+        // rather than a bare "Connecting…" -- the shape of the page is stable.
+        !error && (
+          <section className="status">
+            <p className="status-line">
+              <span className="live-dot" aria-hidden="true" />
+              Opening live stream…
+            </p>
+            <JobProgress current={null} />
+          </section>
+        )
       )}
 
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="callout" role="alert">
+          <IconAlert size={18} />
+          <span>{error}</span>
+        </p>
+      )}
 
-      <p className="muted">
+      <p className="muted" style={{ marginTop: "2rem" }}>
         <Link href="/history">&larr; Back to your mail</Link>
       </p>
     </main>

@@ -17,13 +17,17 @@ const tabs = [
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   return (
-    <div className="wrap">
-      <nav className="admin-nav">
+    <div className="wrap-wide">
+      <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>
+        Operations
+      </p>
+      <nav className="tabs" aria-label="Ops dashboard">
         {tabs.map((t) => (
           <Link
             key={t.href}
             href={t.href}
-            className={pathname === t.href ? "active" : ""}
+            className={`tab${pathname === t.href ? " active" : ""}`}
+            aria-current={pathname === t.href ? "page" : undefined}
           >
             {t.label}
           </Link>

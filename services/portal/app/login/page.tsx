@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { Logo, IconAlert } from "../icons";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -35,37 +36,55 @@ export default function LoginPage() {
 
   return (
     <main className="wrap">
-      <h1>Log in</h1>
-      <form onSubmit={onSubmit}>
-        <label className="field">
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-          />
-        </label>
-        <label className="field">
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
-        </label>
-        <button className="btn" type="submit" disabled={busy}>
-          {busy ? "Logging in…" : "Log in"}
-        </button>
-      </form>
-      {error && <p className="error">{error}</p>}
-      <p className="muted">
-        No account? <Link href="/register">Create one &rarr;</Link>
-      </p>
-      <p className="muted">
-        Or <Link href="/">send as a guest</Link> without an account.
-      </p>
+      <div className="auth-card">
+        <div style={{ marginBottom: "1rem" }}>
+          <Logo size={30} />
+        </div>
+        <h1>Welcome back</h1>
+        <p className="muted" style={{ marginBottom: "1.5rem" }}>
+          Sign in to send mail and see everything you have posted.
+        </p>
+
+        <form onSubmit={onSubmit}>
+          <label className="field">
+            Email
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+            />
+          </label>
+          <label className="field">
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+          </label>
+          <button className="btn btn-block" type="submit" disabled={busy}>
+            {busy ? "Logging in…" : "Log in"}
+          </button>
+        </form>
+
+        {error && (
+          <p className="callout" role="alert" style={{ marginTop: "1rem" }}>
+            <IconAlert size={18} />
+            <span>{error}</span>
+          </p>
+        )}
+
+        <div className="auth-alt">
+          <p className="muted">
+            No account? <Link href="/register">Create one &rarr;</Link>
+          </p>
+          <p className="muted">
+            Or <Link href="/">send as a guest</Link> without one.
+          </p>
+        </div>
+      </div>
     </main>
   );
 }
