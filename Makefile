@@ -94,6 +94,12 @@ test-e2e: ## Portal browser E2E (Playwright vs a clean compose stack) — needs 
 		echo "⚠ test-e2e skipped: no Docker daemon (Goal T7 needs the compose stack)"; exit 0; fi; \
 	bash scripts/e2e/run.sh
 
+.PHONY: test-e2e-full
+test-e2e-full: ## Full-system E2E: two-node stack, real job to delivered + /dev/shm wipe (Goal T8) — needs Docker
+	@if ! docker info >/dev/null 2>&1; then \
+		echo "⚠ test-e2e-full skipped: no Docker daemon (Goal T8 needs the compose stack)"; exit 0; fi; \
+	bash scripts/e2e/full.sh
+
 .PHONY: ci
 ci: fmt-check lint test-race cover cover-portal ## Docker-independent local CI gate
 	@echo "✔ CI gates passed"
