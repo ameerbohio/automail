@@ -7,11 +7,19 @@ services:
     # down. The Docker provider then discovers zero containers, so no routers
     # exist (routes live entirely in the labels below; dynamic.yml has only
     # TLS + middleware) -- every request 404s regardless of host/protocol.
-    # v3.4 vendors a client new enough to negotiate correctly. Pinned (not
-    # :latest) for reproducible deploys.
+    # v3.6 vendors a client new enough to negotiate correctly. Pinned (not
+    # :latest) for reproducible deploys -- see docs/deploy-checklist.md for the
+    # minimum tag a given Engine version needs.
     image: traefik:v3.6
     environment:
-      - DOCKER_API_VERSION=1.46  # Forces Traefik to use a supported API version
+      # Belt-and-braces alongside the image pin: fixes the client's API version
+      # explicitly so the provider never depends on auto-negotiation succeeding.
+      # Setting this DISABLES negotiation, so it is a floor, not a free win:
+      # API 1.46 ships with Engine 27.0, and on an older Engine (24.x tops out at
+      # 1.43, 25.x at 1.44, 26.x at 1.45) the provider is rejected as "too new" --
+      # reproducing the exact blanket-404 this was added to prevent. Engine >=27.0
+      # is therefore a host prerequisite; see docs/deploy-checklist.md §0.
+      - DOCKER_API_VERSION=1.46
     command:
       - "--log.level=DEBUG"
       - "--providers.docker=true"
@@ -21,9 +29,13 @@ services:
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
       - "--entrypoints.websecure.http.tls.options=default"
+    # The only ports this stack publishes. Overridable so a host that already has
+    # 80/443 taken can still run the production profile unchanged -- `make
+    # deploy-smoke` uses this on WSL2, where Windows holds both. Leave at the
+    # defaults on a real deploy host: the browser has to reach them by name.
     ports:
-      - "80:80"
-      - "443:443"
+      - "${TRAEFIK_HTTP_PORT:-80}:80"
+      - "${TRAEFIK_HTTPS_PORT:-443}:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./infra/traefik:/etc/traefik/dynamic:ro
@@ -84,6 +96,11 @@ services:
       # KES/Vault needed for the prototype) -- second encryption layer on
       # top of the browser's E2EE, see docs/study/04-sse-s3-vs-e2ee.md.
       MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY}
+      # The browser PUTs the ciphertext cross-origin (automail.local ->
+      # blob.automail.local), so MinIO must answer the CORS preflight. Scoped to
+      # the portal's origin rather than "*" (the E2E overrides widen it to "*"
+      # because they serve the portal from localhost).
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_CORS_ORIGIN:-https://automail.local}
     volumes:
       - minio_data:/data
     networks:
@@ -93,6 +110,21 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    # Object storage is browser-facing by design: plans/09-api-contracts.md has
+    # the browser PUT the encrypted blob straight to the pre-signed `upload_url`
+    # so the cloud server never receives the blob bytes. That only works if the
+    # URL names a host the browser can resolve, so MinIO gets its own edge
+    # hostname instead of a published port. SigV4 signs the Host header and
+    # Traefik passes it through unchanged, so the signature still verifies.
+    # No secure-headers middleware here: CSP/frame headers are meaningless on an
+    # S3 API response, and the pre-signed URL is the authorization.
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.minio.rule=Host(`blob.automail.local`)"
+      - "traefik.http.routers.minio.entrypoints=websecure"
+      - "traefik.http.routers.minio.tls=true"
+      - "traefik.http.routers.minio.tls.options=default"
+      - "traefik.http.services.minio.loadbalancer.server.port=9000"
 
   cloud-server:
     build: ./services/cloud
@@ -120,6 +152,13 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_SECURE: "false"
+      # Host the *browser* is told to PUT to. Without this the pre-signed URL is
+      # signed against MINIO_ENDPOINT (`minio:9000`) -- a Docker-internal name
+      # over plaintext HTTP that no browser can resolve, so every guest upload
+      # fails on a fresh deploy. Only the upload PUT URL uses this client;
+      # server-side blob ops keep using the internal minio:9000 one.
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-blob.automail.local}
+      MINIO_PUBLIC_SECURE: ${MINIO_PUBLIC_SECURE:-true}
       JWT_PRIVATE_KEY_PATH: /certs/jwt-private.pem
       JWT_PUBLIC_KEY_PATH: /certs/jwt-public.pem
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
@@ -157,6 +196,14 @@ services:
       - cloud-server
     environment:
       MAILBOX_ID: ${DEV_MAILBOX_ID:-00000000-0000-0000-0000-000000000001}
+      # This unit's slot UUID -- must equal the `mailbox_slots.id` row this
+      # mailbox owns. The printer reports occupancy keyed by SLOT_ID and the
+      # cloud's eligibility check (dispatch/route.go `eligible`) looks it up by
+      # the DB id, so a mismatch means no slot is ever found and every job sits
+      # in `queued` forever with nothing logged as an error. The printer's own
+      # fallback ("slot-1") is a standalone-dev convenience and is NEVER right
+      # for a deploy -- set SLOT_ID in .env. See docs/deploy-checklist.md.
+      SLOT_ID: ${SLOT_ID:-}
       CLOUD_SERVER_WS_URL: wss://cloud-server:8443/internal/printer-link
       MTLS_CA_CERT_PATH: /certs/ca-cert.pem
       MTLS_CERT_PATH: /certs/printer-cert.pem
@@ -201,12 +248,28 @@ services:
       CLOUD_API_URL: http://cloud-server:8080
     labels:
       - "traefik.enable=true"
+      - "traefik.http.services.portal.loadbalancer.server.port=3000"
+      # The browser NEVER contacts api.automail.local: services/portal/lib/api.ts
+      # calls same-origin /api/*, which Next proxies server-side to
+      # http://cloud-server:8080. So the guest-ratelimit on the cloud-server-guest
+      # router below is dead weight for real traffic -- plans/02-security.md §6's
+      # "20 req/min per IP on upload and job submission endpoints" only bites if
+      # it also sits here, on the origin the browser actually hits. Rate-limiting
+      # inside the proxy instead would be useless: every request would arrive
+      # from the portal container's single IP.
+      # The longer rule outranks the catch-all router by Traefik's default
+      # priority (rule length), so no explicit priority is needed.
+      - "traefik.http.routers.portal-guest.rule=Host(`automail.local`) && (PathPrefix(`/api/jobs`) || PathPrefix(`/api/recipients`))"
+      - "traefik.http.routers.portal-guest.entrypoints=websecure"
+      - "traefik.http.routers.portal-guest.tls=true"
+      - "traefik.http.routers.portal-guest.tls.options=default"
+      - "traefik.http.routers.portal-guest.service=portal"
+      - "traefik.http.routers.portal-guest.middlewares=secure-headers@file,guest-ratelimit@file"
       - "traefik.http.routers.portal.rule=Host(`automail.local`)"
       - "traefik.http.routers.portal.entrypoints=websecure"
       - "traefik.http.routers.portal.tls=true"
       - "traefik.http.routers.portal.tls.options=default"
       - "traefik.http.routers.portal.middlewares=secure-headers@file"
-      - "traefik.http.services.portal.loadbalancer.server.port=3000"
 
 networks:
   automail:

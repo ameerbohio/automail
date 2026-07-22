@@ -32,7 +32,33 @@ http:
         stsSeconds: 31536000
         stsIncludeSubdomains: true
         stsPreload: true
-        contentSecurityPolicy: "default-src 'self'"
+        # plans/02-security.md §6 specifies `default-src 'self'`. Two directives
+        # have to be added on top of it or the product does not function, and
+        # both failures are invisible to every suite that bypasses Traefik:
+        #
+        #   connect-src -- the guest flow's ciphertext PUT goes from the portal
+        #     origin straight to blob.automail.local (plans/09: the cloud server
+        #     never sees the blob). Under `default-src 'self'` the browser blocks
+        #     that fetch.
+        #
+        #   script-src 'unsafe-inline' -- Next.js App Router streams its RSC
+        #     payload in inline <script> blocks (self.__next_f.push(...)). Under
+        #     `default-src 'self'` all five are blocked, so the SSR HTML renders
+        #     (the page looks fine, and returns 200) but NOTHING hydrates: no
+        #     event handler binds and no request is ever made. Verified in
+        #     Chromium through the edge -- 5 violations, zero API calls.
+        #
+        # 'unsafe-inline' for scripts is a genuine weakening, taken knowingly.
+        # The strict alternative is a per-request nonce emitted from Next
+        # middleware, which means moving the portal's CSP out of Traefik and into
+        # the app -- an owner decision, logged in
+        # docs/study/00-interview-pending-questions.md. Note the E2EE posture
+        # limits the blast radius: the browser holds the document key only for
+        # the lifetime of one submission, and the server never has it either way.
+        contentSecurityPolicy: >-
+          default-src 'self';
+          script-src 'self' 'unsafe-inline';
+          connect-src 'self' https://blob.automail.local
         frameDeny: true
         contentTypeNosniff: true
         referrerPolicy: "no-referrer"
@@ -41,3 +67,11 @@ http:
       rateLimit:
         average: 20
         period: 1m
+        # burst is NOT optional here. Traefik defaults it to 1, which turns
+        # "20 per minute" into "one request every three seconds" -- and one guest
+        # submission is four back-to-back calls (/recipients, its public-key,
+        # /jobs/upload-url, /jobs), so the flow 429s on its second request. The
+        # T7/T8 suites bypass Traefik, so nothing caught this until the T12
+        # deploy smoke drove the real edge. Matching burst to average gives the
+        # documented per-minute allowance instead of a per-request throttle.
+        burst: 20

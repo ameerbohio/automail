@@ -106,6 +106,12 @@ chaos: ## Resilience/chaos: kill each component in turn, prove exactly-once + re
 		echo "⚠ chaos skipped: no Docker daemon (Goal T9 needs the compose stack)"; exit 0; fi; \
 	bash scripts/e2e/chaos.sh
 
+.PHONY: deploy-smoke
+deploy-smoke: ## Deployment parity: production-profile stack driven through the HTTPS edge (Goal T12) — needs Docker
+	@if ! docker info >/dev/null 2>&1; then \
+		echo "⚠ deploy-smoke skipped: no Docker daemon (Goal T12 needs the compose stack)"; exit 0; fi; \
+	bash scripts/deploy/smoke.sh
+
 .PHONY: load
 load: ## Load/perf: submission throughput + SSE fan-out boundedness vs baseline (Goal T10) — needs Docker
 	@if ! docker info >/dev/null 2>&1; then \
