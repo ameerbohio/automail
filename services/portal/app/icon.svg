@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Automail mark: a perforated stamp with a sealed envelope cut into it.
+       The perforations are one round-cap dotted stroke straddling the edge
+       rather than thirty-two notch circles. Colours are literal (not CSS
+       variables) because a favicon renders outside the document. -->
+  <rect x="5" y="5" width="54" height="54" rx="7" fill="#1d3fa0"/>
+  <rect x="5" y="5" width="54" height="54" rx="7" fill="none"
+        stroke="#fbfaf7" stroke-width="5" stroke-linecap="round" stroke-dasharray="0 7.6"/>
+  <g fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="17" y="23" width="30" height="21" rx="3"/>
+    <path d="m18.5 25 13.5 9.5L45.5 25"/>
+  </g>
+  <circle cx="45" cy="42" r="6.5" fill="#c33c2e" stroke="#ffffff" stroke-width="2"/>
+</svg>

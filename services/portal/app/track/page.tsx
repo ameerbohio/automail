@@ -2,19 +2,22 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { JobProgress, DeliveredStamp, isTerminal } from "../journey";
+import { IconAlert, IconArrowRight } from "../icons";
 
-// The status ladder a job climbs (plans/09-api-contracts.md). Used only to
-// render progress; the server is the source of truth for the actual value.
-const LADDER = ["submitted", "queued", "dispatching", "printing", "delivered"];
-
-function isTerminal(status: string): boolean {
-  return status === "delivered" || status === "failed";
+function stamp(): string {
+  return new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 export default function TrackPage() {
   const [jobId, setJobId] = useState("");
   const [token, setToken] = useState("");
   const [statuses, setStatuses] = useState<string[]>([]);
+  const [times, setTimes] = useState<Record<string, string>>({});
   const [current, setCurrent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
@@ -52,6 +55,7 @@ export default function TrackPage() {
 
     stop();
     setStatuses([]);
+    setTimes({});
     setCurrent(null);
 
     // Guest auth: the token rides in the query string because EventSource
@@ -69,6 +73,11 @@ export default function TrackPage() {
         const data = JSON.parse(ev.data) as { status: string; error?: string };
         setCurrent(data.status);
         setStatuses((prev) => [...prev, data.status]);
+        // First sighting of a status wins, so the tracker shows when the job
+        // *entered* each stage rather than when it last repeated it.
+        setTimes((prev) =>
+          prev[data.status] ? prev : { ...prev, [data.status]: stamp() },
+        );
         if (data.status === "failed" && data.error) {
           setError(data.error);
         }
@@ -90,16 +99,19 @@ export default function TrackPage() {
     };
   }
 
-  const currentIndex = current ? LADDER.indexOf(current) : -1;
+  const delivered = current === "delivered";
+  const failed = current === "failed";
 
   return (
     <main className="wrap">
+      <p className="eyebrow">Guest tracking</p>
       <h1>Track a job</h1>
-      <p className="muted">
-        Enter the job ID and guest token you saved when you submitted.
+      <p className="lede" style={{ margin: "0.5rem 0 1.5rem" }}>
+        Enter the job ID and the one-time guest token you saved when you
+        submitted. Status is streamed live as the document moves.
       </p>
 
-      <form onSubmit={track}>
+      <form onSubmit={track} className="card">
         <label className="field">
           Job ID
           <input
@@ -125,30 +137,21 @@ export default function TrackPage() {
 
       {current && (
         <section className="status">
-          <p>
+          <p className="status-line">
+            <span
+              className={`live-dot${delivered ? " is-done" : ""}${failed ? " is-failed" : ""}`}
+              aria-hidden="true"
+            />
             Current status: <strong>{current}</strong>
-            {current === "failed" && " ✗"}
-            {current === "delivered" && " ✓"}
           </p>
-          <ol className="ladder">
-            {LADDER.map((s, i) => (
-              <li
-                key={s}
-                className={
-                  current === "failed"
-                    ? "pending"
-                    : i <= currentIndex
-                      ? "reached"
-                      : "pending"
-                }
-              >
-                {s}
-              </li>
-            ))}
-          </ol>
-          <details>
+
+          <JobProgress current={current} times={times} />
+
+          {delivered && <DeliveredStamp at={times["delivered"]} />}
+
+          <details className="log-details">
             <summary>Event log ({statuses.length})</summary>
-            <ol className="steps">
+            <ol className="tape">
               {statuses.map((s, i) => (
                 <li key={i}>{s}</li>
               ))}
@@ -157,10 +160,16 @@ export default function TrackPage() {
         </section>
       )}
 
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="callout" role="alert">
+          <IconAlert size={18} />
+          <span>{error}</span>
+        </p>
+      )}
 
-      <p className="muted">
-        <Link href="/">&larr; Send another document</Link>
+      <p className="muted" style={{ marginTop: "2rem" }}>
+        <Link href="/">Send another document</Link>{" "}
+        <IconArrowRight size={14} style={{ display: "inline", verticalAlign: "-2px" }} />
       </p>
     </main>
   );

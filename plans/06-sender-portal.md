@@ -166,4 +166,14 @@ services/portal/
 
 ## UI
 
-Minimal. No component library required for the prototype — plain HTML elements with basic CSS is fine. The encryption flow is the demo, not the design. What matters is that the flow is observable (status transitions visible, error states clear).
+No component library and no web fonts — one hand-written stylesheet (`app/globals.css`) plus a hand-authored inline SVG set (`app/icons.tsx`). Zero extra dependencies, and the portal renders identically with no egress, which the demo/printer boxes need.
+
+**Design language — "Paper & Ink".** Physical-mail cues rather than dashboard chrome: warm envelope-stock paper instead of flat grey, a par-avion chevron band across the top of every page, a perforated-stamp logo, a franking postmark struck over delivered jobs, and a serif display face over a system sans (correspondence register, not app register).
+
+- **Tokens.** Colour, type, radius, shadow and easing are CSS custom properties with a `prefers-color-scheme: dark` override. Everything downstream reads tokens, so dark mode costs no second asset.
+- **Motion.** Small and purposeful: staggered entrance, a pulsing ring on the live stop, the postmark landing like a rubber stamp. All of it is disabled under `prefers-reduced-motion: reduce` — progress is encoded in colour and position, never in the animation alone.
+- **Responsive.** One markup path. The journey tracker rotates from a horizontal route to a vertical rail under 560px in CSS; tables become stacked cards under 640px via `data-label` on each cell, so the markup stays a real `<table>`.
+
+**Job journey tracker** (`app/journey.tsx`, shared by `/track` and `/jobs/:id`). The five ladder statuses are drawn as postal stops with a route line the document travels along, driven straight off the SSE frames. Each stop carries the time it was first seen, and a caption explains what happens to the bytes at the current stop — the tracker doubles as an explanation of the security model. Progress animates with a `scaleX`/`scaleY` transform rather than an animated width, so it is composited and cannot be caught mid-relayout.
+
+The flow must stay observable: status transitions visible, error states clear.

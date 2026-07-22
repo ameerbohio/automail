@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { StatusBadge } from "../admin/ui";
+import { IconQueue, IconArrowRight } from "../icons";
 
 interface HistoryJob {
   job_id: string;
@@ -11,6 +13,15 @@ interface HistoryJob {
   page_count: number;
   created_at: string;
   delivered_at?: string;
+}
+
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function HistoryPage() {
@@ -47,40 +58,76 @@ export default function HistoryPage() {
     };
   }, [loading, isAuthenticated, authFetch, router]);
 
+  const delivered = jobs?.filter((j) => j.status === "delivered").length ?? 0;
+
   return (
-    <main className="wrap">
-      <h1>Your mail</h1>
-      {error && <p className="error">{error}</p>}
-      {jobs === null && !error && <p className="muted">Loading…</p>}
-      {jobs !== null && jobs.length === 0 && (
-        <p className="muted">
-          You haven&rsquo;t sent anything yet.{" "}
-          <Link href="/">Send a document &rarr;</Link>
-        </p>
+    <main className="wrap-wide">
+      <div className="page-head">
+        <div>
+          <p className="eyebrow">Account</p>
+          <h1>Your mail</h1>
+        </div>
+        {jobs !== null && jobs.length > 0 && (
+          <p className="muted">
+            {jobs.length} sent &middot; {delivered} delivered
+          </p>
+        )}
+      </div>
+
+      {error && <p className="callout">{error}</p>}
+
+      {jobs === null && !error && (
+        <div className="skeleton-stack" aria-hidden="true">
+          <div className="skeleton" style={{ width: "100%" }} />
+          <div className="skeleton" style={{ width: "82%" }} />
+          <div className="skeleton" style={{ width: "64%" }} />
+        </div>
       )}
+
+      {jobs !== null && jobs.length === 0 && (
+        <div className="empty">
+          <IconQueue size={40} />
+          <p>Nothing posted yet.</p>
+          <Link className="btn" href="/">
+            Send a document
+            <IconArrowRight size={16} />
+          </Link>
+        </div>
+      )}
+
       {jobs !== null && jobs.length > 0 && (
-        <table className="history">
-          <thead>
-            <tr>
-              <th>Sent</th>
-              <th>Pages</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map((j) => (
-              <tr key={j.job_id}>
-                <td>{new Date(j.created_at).toLocaleString()}</td>
-                <td>{j.page_count}</td>
-                <td>{j.status}</td>
-                <td>
-                  <Link href={`/jobs/${j.job_id}`}>track</Link>
-                </td>
+        <div className="table-card">
+          <table className="history">
+            <thead>
+              <tr>
+                <th>Sent</th>
+                <th>Pages</th>
+                <th>Status</th>
+                <th>Delivered</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {jobs.map((j) => (
+                <tr key={j.job_id}>
+                  {/* data-label feeds the stacked-card table layout below
+                      640px (globals.css) -- same markup, no second render. */}
+                  <td data-label="Sent">{shortDate(j.created_at)}</td>
+                  <td data-label="Pages">{j.page_count}</td>
+                  <td data-label="Status">
+                    <StatusBadge status={j.status} />
+                  </td>
+                  <td data-label="Delivered">
+                    {j.delivered_at ? shortDate(j.delivered_at) : "—"}
+                  </td>
+                  <td>
+                    <Link href={`/jobs/${j.job_id}`}>track</Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </main>
   );
