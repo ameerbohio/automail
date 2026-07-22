@@ -14,6 +14,11 @@ export function forwardAuth(req: NextRequest): Record<string, string> {
   return auth ? { authorization: auth } : {};
 }
 
+// Names the cloud node that served the upstream response (cloud
+// middleware.go NodeHeader). Forwarded through the proxy so the browser can
+// show which of the N stateless nodes handled a submission.
+export const NODE_HEADER = "x-automail-node";
+
 // proxyJSON relays an upstream JSON response verbatim (status + body). The
 // portal adds nothing and inspects nothing: a thin pass-through so the browser
 // sees the cloud server's own contract and error codes (the roadmap Phase 7
@@ -21,10 +26,12 @@ export function forwardAuth(req: NextRequest): Record<string, string> {
 // never parses or logs the body -- encrypted_key must pass through opaque.
 export async function proxyJSON(upstream: Response): Promise<Response> {
   const body = await upstream.text();
-  return new Response(body, {
-    status: upstream.status,
-    headers: { "Content-Type": "application/json" },
-  });
+  const headers = new Headers({ "Content-Type": "application/json" });
+  // The one upstream header that is copied through. Still a thin proxy: it is
+  // relayed as-is, never synthesised, and absent if upstream didn't send it.
+  const node = upstream.headers.get(NODE_HEADER);
+  if (node) headers.set(NODE_HEADER, node);
+  return new Response(body, { status: upstream.status, headers });
 }
 
 // The cloud server scopes its refresh cookie to Path=/auth/refresh, but the

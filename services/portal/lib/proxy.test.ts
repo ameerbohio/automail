@@ -4,7 +4,7 @@
 // and rewrite the refresh cookie's path across the hop.
 import { describe, it, expect } from "vitest";
 import type { NextRequest } from "next/server";
-import { forwardAuth, proxyJSON, proxyWithCookies } from "./proxy";
+import { forwardAuth, proxyJSON, proxyWithCookies, NODE_HEADER } from "./proxy";
 
 // forwardAuth only reads req.headers.get(), so a Headers-bearing stub suffices.
 function reqWith(headers: Record<string, string>): NextRequest {
@@ -41,6 +41,30 @@ describe("proxyJSON — opaque pass-through", () => {
     const res = await proxyJSON(new Response(`{"error":"conflict"}`, { status: 409 }));
     expect(res.status).toBe(409);
     expect(await res.text()).toBe(`{"error":"conflict"}`);
+  });
+
+  it("forwards the cloud node header so the browser can show which node served it", async () => {
+    const up = new Response("{}", {
+      status: 200,
+      headers: { [NODE_HEADER]: "cloud-server-2" },
+    });
+    const res = await proxyJSON(up);
+    expect(res.headers.get(NODE_HEADER)).toBe("cloud-server-2");
+  });
+
+  it("never synthesises a node header when upstream sent none", async () => {
+    const res = await proxyJSON(new Response("{}", { status: 200 }));
+    expect(res.headers.get(NODE_HEADER)).toBeNull();
+  });
+
+  it("forwards no other upstream header (still a thin proxy)", async () => {
+    const up = new Response("{}", {
+      status: 200,
+      headers: { "set-cookie": "leak=1", "x-internal-debug": "secret" },
+    });
+    const res = await proxyJSON(up);
+    expect(res.headers.get("x-internal-debug")).toBeNull();
+    expect(res.headers.getSetCookie()).toEqual([]);
   });
 });
 

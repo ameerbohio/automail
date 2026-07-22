@@ -4,6 +4,18 @@ All external endpoints are served via Traefik (HTTPS, TLS 1.3). Internal endpoin
 
 ---
 
+## Response Header (all external endpoints)
+
+```
+X-Automail-Node: <NODE_ID>
+```
+
+Every response from the cloud server names the node that served it — the same `NODE_ID` (defaulting to `$HOSTNAME`) that identifies the node as a Redis Streams consumer. Set by a middleware wrapping the whole mux, so it is present on success, on errors, and on the SSE stream's initial response.
+
+Metadata only: a consumer name, never a secret, and never anything derived from the document. The portal's `/api/*` proxies forward this one header and the sender portal shows which node handled a submission — the point being that the backend is N stateless nodes and no node holds state that would pin a session. It does disclose topology; see `plans/13-v2-roadmap.md` "Richer request-path observability" for why a non-demo deployment would gate it behind a flag or emit an opaque per-boot id.
+
+---
+
 ## External Endpoints (cloud server, authenticated unless noted)
 
 ### `GET /healthz`
