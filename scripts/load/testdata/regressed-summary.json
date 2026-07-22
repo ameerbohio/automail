@@ -1,0 +1,21 @@
+{
+  "_comment": "Deliberately-regressed load summary used to self-test check-baseline.py (Goal T10 Verify: 'a regression is visible against the baseline'). `make load-selftest` asserts the detector FAILS on this input. It breaches every bound at once: latency + error-rate blowout, throughput collapse, a stalled dispatch backlog (drain_seconds -1 = never drained, i.e. the consumer group stopped keeping up), and -- the classic SSE scaling bug -- an unbounded-goroutine leak (residual stays ~740 above idle after every subscriber disconnected, i.e. per-connection cleanup regressed).",
+  "submission": {
+    "p95_ms": 8500,
+    "avg_ms": 4200,
+    "error_rate": 0.31,
+    "rps": 6,
+    "count": 400
+  },
+  "sse_fanout": {
+    "subscribers": 150,
+    "idle_goroutines": 40,
+    "peak_goroutines": 950,
+    "residual_goroutines": 780
+  },
+  "dispatch": {
+    "queued_backlog": 60,
+    "drain_seconds": -1,
+    "stream_len": 999
+  }
+}

@@ -1,0 +1,47 @@
+# Load / performance override (testing-plan Part 8 / Goal T10). A single cloud
+# node with the pprof profiler enabled, plus a k6 tool service that runs INSIDE
+# the compose network. Driving load from inside the network matters: the cloud
+# signs its presigned upload URLs for the internal `minio:9000` host, so a k6
+# container on the `automail` network reaches them directly, while the host only
+# does readiness checks, pprof scraping, and printer control over published
+# ports. Use via scripts/load/run.sh / `make load`.
+services:
+  cloud-server:
+    environment:
+      # Enable the pprof listener (services/cloud/pprof.go) for THIS profile only
+      # -- never set in the base compose or on a deploy host. It lives on its own
+      # port, off the public mux, and is used to snapshot goroutine/heap counts
+      # under load.
+      PPROF_ADDR: ":6060"
+    ports:
+      - "8080:8080" # host-side readiness gate + recipient lookup
+      - "6060:6060" # host-side pprof scraping (goroutine/heap snapshots)
+
+  printer:
+    environment:
+      # Hermetic: the full RSA/AES decrypt pipeline runs but the physical lp call
+      # is skipped. The load driver sends a synthetic (non-decryptable)
+      # encrypted_key -- we are measuring the CLOUD's submit/dispatch path, not
+      # print success, so a decrypt failure at the printer is fine and expected.
+      # SLOT_ID must equal the seeded slot so dispatch eligibility resolves.
+      DEV_MODE: "true"
+      SLOT_ID: "22222222-2222-2222-2222-222222222222"
+
+  # One-shot load generator. profiles:[tools] keeps it out of `up`; run it with
+  # `docker compose ... run --rm k6 run /scripts/<script>.js`. Pinned for
+  # reproducible numbers.
+  k6:
+    image: grafana/k6:2.1.0
+    profiles: ["tools"]
+    # Run as the invoking host user (scripts/load/run.sh exports these). The k6
+    # image's default non-root uid does not own the bind-mounted report dir, so
+    # handleSummary's write to /report/submission.json fails with "permission
+    # denied" -- and k6 still exits 0, which made the failure surface much later
+    # as a missing-file error while building the summary. Matching uid/gid keeps
+    # the written report owned by the host user (no root-owned files in the repo).
+    user: "${LOAD_UID:-1000}:${LOAD_GID:-1000}"
+    networks:
+      - automail
+    volumes:
+      - ./scripts/load:/scripts:ro
+      - ./scripts/load/report:/report

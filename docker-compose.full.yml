@@ -39,9 +39,9 @@ services:
       - "9000:9000"
 
   cloud-server:
-    # depends_on only orders start, not readiness; cloud-server fatals on boot if
-    # Postgres/Redis/MinIO aren't answering yet (EnsureBucket). Restart until they
-    # are. Same reasoning as docker-compose.e2e.yml.
+    # Base compose's depends_on: condition: service_healthy already blocks start
+    # until Postgres/Redis/MinIO answer; this is just a defensive backstop in
+    # case a healthcheck flakes. Same reasoning as docker-compose.e2e.yml.
     restart: on-failure
     environment:
       # Presign the browser/driver upload URL against the host-reachable MinIO so
@@ -60,9 +60,12 @@ services:
     build: ./services/cloud
     restart: on-failure
     depends_on:
-      - postgres
-      - redis
-      - minio
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
       PORT: 8080
       MTLS_PORT: 8443

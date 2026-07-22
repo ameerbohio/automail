@@ -27,9 +27,9 @@ services:
       - "9000:9000"
 
   cloud-server:
-    # cloud-server fatals if Postgres/Redis/MinIO aren't up yet (EnsureBucket on
-    # boot). depends_on only orders container *start*, not readiness, so on a
-    # fast `up` it can lose the race; restart until its dependencies answer.
+    # Base compose's depends_on: condition: service_healthy already blocks start
+    # until Postgres/Redis/MinIO answer; this is just a defensive backstop in
+    # case a healthcheck flakes.
     restart: on-failure
     environment:
       # Browser-reachable object-storage host for the pre-signed upload URL.

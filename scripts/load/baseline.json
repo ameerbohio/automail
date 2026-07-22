@@ -1,0 +1,22 @@
+{
+  "_comment": "Committed load baseline (testing-plan Part 8 / Goal T10). Ceilings/floors come from the measured local run recorded in _measured below, plus margin; check-baseline.py fails a run that breaches them. Regenerate with `make load` (writes scripts/load/report/summary.json) and only widen a bound with a documented reason. Absolute latency numbers are host-relative -- the point is regression detection against THIS baseline, not a universal SLA.",
+  "_measured": {
+    "_comment": "Actual numbers from the calibration run on the WSL2 dev host (2026-07-22, 150 subscribers), recorded so future runs compare against reality and not just against the ceilings.",
+    "submission": { "p95_ms": 7.41, "avg_ms": 6.6, "error_rate": 0, "rps": 28.63, "count": 1812 },
+    "sse_fanout": { "subscribers": 150, "idle_goroutines": 16, "peak_goroutines": 612, "residual_goroutines": 11 }
+  },
+  "submission": {
+    "p95_ms_max": 3000,
+    "error_rate_max": 0.05,
+    "rps_min": 10
+  },
+  "sse_fanout": {
+    "_comment": "growth_per_sub ~4 is BY DESIGN, not a leak: StreamJob opens one Redis subscription per connection, so each held stream costs roughly the handler goroutine + the go-redis connection read-loop + the sub.Channel() pump. Measured 3.97; the ceiling of 5 leaves margin while still catching a real per-connection regression (one extra goroutine per subscriber would breach it). The LEAK detector is goroutine_residual_max -- linear growth under load is expected, failing to return to baseline after release is not.",
+    "goroutine_growth_per_sub_max": 5,
+    "goroutine_residual_max": 40
+  },
+  "dispatch": {
+    "_comment": "Backlog drain (Phase C): jobs submitted while the printer is offline queue onto the jobs:pending Redis Stream; when the printer returns, the consumer group must drain them. The ceiling is time-to-zero-backlog, so a dispatcher that stops keeping up -- or stalls entirely -- fails the run.",
+    "drain_seconds_max": 60
+  }
+}

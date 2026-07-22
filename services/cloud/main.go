@@ -271,6 +271,14 @@ func main() {
 		}()
 	}
 
+	// Optional pprof listener for load/perf profiling (Goal T10 / testing-plan
+	// Part 8). OFF unless PPROF_ADDR is set -- it is never enabled in the base
+	// compose or on a deploy host, only in docker-compose.load.yml, and it lives
+	// on its OWN listener that is never wired into the public mux above or routed
+	// by Traefik. pprof exposes heap/goroutine dumps, so leaving it off by
+	// default keeps that surface off production entirely.
+	startPprof(os.Getenv("PPROF_ADDR"))
+
 	addr := ":" + port
 	log.Printf("cloud-server listening on %s", addr)
 	server := &http.Server{

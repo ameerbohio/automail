@@ -116,3 +116,26 @@ Answer: _(to be filled in)_
 Answer: _(to be filled in)_
 
 ---
+
+---
+
+## OWNER DECISION — SSE fan-out opens one Redis subscription per subscriber (Goal T10)
+
+**Q: `StreamJob` (handlers/jobs.go) calls `s.Redis.Subscribe("job:<id>:status")`
+once per client connection. So N browser tabs watching the *same* job open N
+Redis subscriptions and N server goroutines — fan-out is O(N), not O(1). Goal
+T10's load test confirms this is *bounded* (goroutines return to baseline when
+clients disconnect — no leak), which is the correctness bar. But the plan's
+interview framing says "SSE fan-out is bounded because subscribers share one
+Redis subscription per job," which the code does NOT currently do. Should we
+(a) leave it as-is (simple, and N-per-job is fine at this scale), or (b)
+implement a per-node, per-job fan-out hub: one Redis subscription per job on
+each node, multiplexing to all local subscribers of that job? Option (b) is the
+textbook answer and cuts Redis connections from O(subscribers) to O(jobs·nodes),
+but adds a concurrency-managed registry (subscribe on first local watcher,
+unsubscribe on last) that must not leak or race.**
+*Context: found while implementing the Part 8 load suite. Not a bug — the design
+is leak-free and correct — but a real scaling design decision, and the plan's
+own words describe option (b). Flagged for the owner rather than silently
+refactored (touches the SSE hot path). See docs/study/17 "Performance & load".*
+Answer: _(to be filled in)_
