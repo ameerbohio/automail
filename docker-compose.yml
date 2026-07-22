@@ -1,6 +1,15 @@
 services:
   traefik:
-    image: traefik:v3.0
+    # v3.0 (Apr 2024) vendors an old Docker-client SDK that fails Docker API
+    # version negotiation against modern Engines (the VM runs Docker 29.x):
+    # the client's max API version is below the daemon's minimum, so the
+    # provider's handshake is hard-rejected in a loop instead of negotiating
+    # down. The Docker provider then discovers zero containers, so no routers
+    # exist (routes live entirely in the labels below; dynamic.yml has only
+    # TLS + middleware) -- every request 404s regardless of host/protocol.
+    # v3.4 vendors a client new enough to negotiate correctly. Pinned (not
+    # :latest) for reproducible deploys.
+    image: traefik:v3.4
     command:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
