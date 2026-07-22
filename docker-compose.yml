@@ -50,7 +50,19 @@ services:
       - automail
 
   minio:
-    image: minio/minio:latest
+    # Pinned to a `-cpuv1` variant on purpose -- do NOT bump to :latest or a bare
+    # RELEASE tag. Since RELEASE.2023-11-01T01-57-10Z, MinIO's default image is
+    # based on RHEL9/UBI9, whose glibc hard-requires the x86-64-v2 microarch
+    # baseline (SSE4.2/POPCNT/...). On a deploy host whose CPU predates that
+    # baseline (e.g. the Proxmox target's AMD A6-3600 "Llano", 2011), the default
+    # image dies on boot with `Fatal glibc error: CPU does not support
+    # x86-64-v2`, and since cloud-server depends_on minio, that one crash takes
+    # the whole stack down. MinIO publishes a parallel `-cpuv1` image built on a
+    # v1-compiled base for exactly these CPUs (minio/minio issue #18365, fixed by
+    # PR #18370) -- SAME MinIO, so pinning it costs no feature/CVE rollback. This
+    # is the newest cpuv1 tag published (2025-09-07). See docs/proxmox-vm-setup.md
+    # "Host-CPU compatibility". Modern CPUs run this image fine too.
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
