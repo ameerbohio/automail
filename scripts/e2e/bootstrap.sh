@@ -28,6 +28,16 @@ if [ ! -f infra/certs/printer-private.pem ]; then
   PRINTER_KEY_PASSPHRASE="$PRINTER_PASS" bash infra/certs/gen-printer-keys.sh
 fi
 
+# 3b. Browser-facing edge TLS cert (self-signed) for the Traefik front door. The
+#     E2E overrides publish the portal/MinIO directly and bypass Traefik, so this
+#     isn't strictly needed for `make test-e2e{,-full}`; generated anyway so a
+#     fresh clone that does a plain `docker compose up` gets a working HTTPS edge
+#     instead of a sniStrict rejection.
+if [ ! -f infra/traefik/edge-cert.pem ]; then
+  echo "==> Generating edge TLS certificate"
+  bash infra/certs/gen-edge-certs.sh
+fi
+
 # 4. .env with real (non-production) values.
 if [ ! -f .env ]; then
   echo "==> Writing .env"
