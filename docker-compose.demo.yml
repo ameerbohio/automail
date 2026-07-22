@@ -1,0 +1,100 @@
+# Public demo override: the whole stack plus a Cloudflare quick tunnel, so the
+# system is reachable from a phone with no port forwarding, no DNS, no hosts file
+# and no certificate warnings. Driven by scripts/demo/up.sh (`make demo`), which
+# handles the one thing compose cannot: the tunnel hostname does not exist until
+# the tunnel is running.
+#
+# !! This publishes your machine to the internet. Read scripts/demo/up.sh's
+# !! header for what is and is not protected. Tear it down with `make demo-down`.
+#
+# WHY THIS LOOKS DIFFERENT FROM THE PRODUCTION PROFILE
+#
+# The production profile (docker-compose.yml) routes THREE hostnames over TLS
+# with the self-signed edge cert: automail.local, api.automail.local and
+# blob.automail.local. A quick tunnel gives exactly ONE hostname and terminates
+# TLS itself, so a naive tunnel to the production profile 404s on every route
+# (no Host() matches) and, even if it did not, the pre-signed upload URL would
+# still point at blob.automail.local, which a phone cannot resolve.
+#
+# Three changes reconcile that, and all three are demo-only:
+#
+#   1. Routers move to the plain-HTTP `web` entrypoint. Cloudflare does real TLS
+#      at its edge, so local TLS is redundant here -- and this is what spares the
+#      phone the self-signed certificate warning entirely.
+#
+#   2. Host() matchers are dropped in favour of path matching. The tunnel
+#      hostname is not known until cloudflared has started, and Traefik's Docker
+#      provider reads labels at container-create time, so a Host() rule would
+#      need a second recreate. Paths are unambiguous here: /automail/ is the
+#      object-storage bucket and nothing else in the app uses it.
+#
+#   3. Object storage is served from the SAME origin under /automail/, rather
+#      than its own hostname. This is the interesting one: SigV4 signs the host
+#      and path but NOT the scheme, so a URL signed for https://<tunnel>/automail/...
+#      still verifies when it reaches MinIO over plain HTTP -- provided the Host
+#      header survives, which Cloudflare passes through unchanged. Being
+#      same-origin also means the browser skips the CORS preflight and the CSP's
+#      connect-src exception stops being load-bearing.
+#
+# The guest rate limit and the secure-headers middleware stay on: this is the
+# configuration most exposed to the internet, so it is the last place to relax
+# them.
+
+services:
+  # Dials OUT to Cloudflare and keeps the connection open; inbound requests are
+  # multiplexed back down it. Same NAT-traversal reasoning as the printer's
+  # dial-out link to the cloud server (plans/03) -- a host behind NAT cannot be
+  # dialled, so it dials you. Nothing is bound on the host and no firewall rule
+  # is needed. `traefik` resolves on the compose network.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://traefik:80
+    depends_on:
+      - traefik
+    # Deliberately NOT `restart: unless-stopped`. A quick tunnel is assigned a
+    # fresh random hostname on every start, so an automatic restart would hand
+    # out a NEW public URL while the one printed on screen goes dead -- and,
+    # worse, cloud-server's MINIO_PUBLIC_ENDPOINT would still be signing upload
+    # URLs for the old hostname, so submissions would fail at the upload with
+    # nothing obviously wrong. Failing visibly and making the operator re-run
+    # `make demo` is the safer behaviour: the script re-derives the hostname and
+    # re-points the pre-signer as one atomic step.
+    restart: "no"
+    networks:
+      - automail
+
+  printer:
+    environment:
+      # The demo host has no cupsd and no Canon MF240 -- those live on the
+      # Proxmox VM. DEV_MODE skips ONLY the physical lp call: the RSA/AES
+      # decrypt, the /dev/shm write, the unlink-before-callback and the zeroing
+      # all still run, and jobs still reach "delivered". Setting this to false
+      # here would make every job FAIL, not print. Real paper is Goal 6 on the
+      # VM -- see docs/cups-host-setup.md.
+      DEV_MODE: "true"
+      # Must equal the seeded mailbox_slots.id or dispatch finds no eligible
+      # slot and every job parks in "queued" (see docs/deploy-checklist.md §5).
+      SLOT_ID: "22222222-2222-2222-2222-222222222222"
+
+  portal:
+    labels: !override
+      - "traefik.enable=true"
+      - "traefik.http.services.portal.loadbalancer.server.port=3000"
+      # Longer rule wins on Traefik's default priority, so the guest endpoints
+      # keep their rate limit without an explicit priority.
+      - "traefik.http.routers.demo-portal-guest.rule=PathPrefix(`/api/jobs`) || PathPrefix(`/api/recipients`)"
+      - "traefik.http.routers.demo-portal-guest.entrypoints=web"
+      - "traefik.http.routers.demo-portal-guest.service=portal"
+      - "traefik.http.routers.demo-portal-guest.middlewares=secure-headers@file,guest-ratelimit@file"
+      - "traefik.http.routers.demo-portal.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.demo-portal.entrypoints=web"
+      - "traefik.http.routers.demo-portal.service=portal"
+      - "traefik.http.routers.demo-portal.middlewares=secure-headers@file"
+
+  minio:
+    labels: !override
+      - "traefik.enable=true"
+      - "traefik.http.services.minio.loadbalancer.server.port=9000"
+      - "traefik.http.routers.demo-minio.rule=PathPrefix(`/automail/`)"
+      - "traefik.http.routers.demo-minio.entrypoints=web"
+      - "traefik.http.routers.demo-minio.service=minio"

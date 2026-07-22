@@ -1,0 +1,21 @@
+#!/bin/sh
+# Minimal CUPS backend that captures what a real printer would have received.
+#
+# A CUPS backend is just an executable: CUPS invokes it as
+#   argv1=job-id argv2=user argv3=title argv4=copies argv5=options [argv6=file]
+# with the payload on stdin when argv6 is absent, and with NO arguments for
+# device discovery (which must list the device and exit 0, or cupsd logs a
+# discovery failure on every startup).
+#
+# Existence matters: alpine's `cups` package ships no `file` backend at all, so
+# a queue pointed at file:/// silently reports job-completed-successfully while
+# writing nothing anywhere. A completed CUPS job is NOT evidence anything was
+# printed -- this backend is what turns the demo's print step into a real
+# assertion.
+[ $# -eq 0 ] && { echo 'direct tofile "Unknown" "Automail capture backend"'; exit 0; }
+OUT="${DEVICE_URI#tofile:}"
+OUT="${OUT#//}"
+[ -n "$OUT" ] || OUT=/out/last-print.pdf
+if [ -n "$6" ]; then cat "$6" > "$OUT"; else cat > "$OUT"; fi
+echo "captured $(wc -c < "$OUT") bytes to $OUT" >&2
+exit 0

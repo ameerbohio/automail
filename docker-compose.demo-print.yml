@@ -1,0 +1,59 @@
+# Print-enabled demo layer: `make demo-print` (= PRINT=1 make demo).
+#
+# Layered on top of docker-compose.demo.yml. It turns OFF DEV_MODE so the printer
+# makes the real `lp` call -- the one thing no other profile in this repo
+# exercises -- and supplies a CUPS server for that call to reach.
+#
+# WHY A CUPS CONTAINER RATHER THAN THE HOST'S CUPS
+#
+# The base compose mounts the host's /run/cups/cups.sock, which is right for the
+# Proxmox deployment (docs/cups-host-setup.md) but needs a cupsd installed on the
+# host -- root access this dev machine does not have -- and, on WSL2, a USB
+# printer the kernel cannot see anyway (no usbipd passthrough).
+#
+# The printer image ships no /etc/cups, so `lp` honours CUPS_SERVER and will talk
+# to a CUPS server over the network. That makes the real print path testable with
+# no host CUPS, no root and no USB: DEV_MODE=false, `lp` genuinely runs, cupsd
+# genuinely accepts and completes the job, and the bytes are captured so they can
+# be compared against what was decrypted.
+#
+# WHAT THIS DOES AND DOES NOT PROVE
+#
+# Proves: printDocument() succeeds, the job reaches "delivered" rather than
+# "failed", and the exact decrypted PDF arrives at the print queue.
+# Does not prove: ink on paper. For that, either
+#   (a) share the printer from Windows and set
+#       PRINTER_DEVICE_URI=smb://user:pass@HOST/Canon_MF240 -- real paper, no
+#       USB passthrough and no host CUPS needed; or
+#   (b) do the full host setup in docs/cups-host-setup.md, which is what the
+#       Proxmox deployment uses.
+# Because the queue is named PRINTER_NAME in both cases, moving between them is a
+# device-URI change only -- nothing in the app configuration changes.
+#
+# SECURITY (plans/02-security.md): with DEV_MODE off, the decrypted PDF leaves the
+# printer's tmpfs and enters the CUPS spool. On the Proxmox host that spool is
+# mounted on tmpfs; here it is ordinary container storage, so plaintext touches
+# non-tmpfs storage for the life of the spool file. That is the open owner
+# decision in docs/cups-host-setup.md. Fine for a local test with fixture data --
+# do not read this profile as invariant-preserving.
+
+services:
+  cups:
+    build: ./infra/cups-demo
+    environment:
+      PRINTER_NAME: ${PRINTER_NAME:-Canon_MF240}
+      # Default captures the job instead of printing it. Override to print for real.
+      PRINTER_DEVICE_URI: ${PRINTER_DEVICE_URI:-tofile:/out/last-print.pdf}
+    networks:
+      - automail
+
+  printer:
+    depends_on:
+      - cups
+    environment:
+      DEV_MODE: "false"
+      PRINTER_NAME: ${PRINTER_NAME:-Canon_MF240}
+      # Redirects lp away from the (absent) host socket to the CUPS container.
+      # Takes precedence over /run/cups/cups.sock, so the base compose's mount is
+      # left in place and simply unused here.
+      CUPS_SERVER: cups
