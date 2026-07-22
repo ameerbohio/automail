@@ -1,0 +1,98 @@
+# Full-system E2E override (testing-plan Part 5 / Goal T8). Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
+#
+# What this proves that the Part 4b browser E2E (docker-compose.e2e.yml) does
+# not: the *distributed* seams. It runs TWO independent cloud processes over one
+# shared Redis/Postgres/MinIO, and drives a real encrypted job through them with
+# the printer's dial-out socket pinned to exactly one of the two nodes.
+#
+# Two-node topology, and why named replicas instead of `--scale cloud-server=2`:
+#   The roadmap's Phase 5 verify says `--scale cloud-server=2`. Scaled replicas
+#   share one service alias (round-robin DNS) and cannot each publish a distinct
+#   host port, so a host-side driver cannot *deterministically* target "the node
+#   that does not hold the printer socket" -- it would rely on load-balancer
+#   luck. Two explicitly-named nodes exercise the identical distributed property
+#   (Redis pub/sub fan-in / fan-out across independent cloud processes, one of
+#   which owns the printer socket) while making that targeting deterministic:
+#     - the printer only ever dials the `cloud-server` alias (CLOUD_SERVER_WS_URL
+#       in the base compose), so `cloud-server` is ALWAYS the socket owner and
+#       `cloud-server-2` is ALWAYS the non-owner;
+#     - each node publishes its own host port (8080 / 8081), so the driver can
+#       submit a job to the non-owner and open the SSE stream on the non-owner.
+#   A `POST /jobs` to the non-owner returning status "dispatching" is itself the
+#   fan-in proof: its Publish("mailbox:<id>:dispatch") had zero local subscribers
+#   and only succeeded because the OWNER node received it and relayed it down the
+#   socket (receivers==0 would have made the status "queued"). Reading the SSE
+#   stream on the non-owner up to "delivered" is the fan-out proof: that status
+#   originated on the owner's socket and crossed Redis to the non-owner.
+#
+# Ports published to the host for the Go driver (services/../e2e):
+#   8080  cloud-server    (owner: holds the printer socket)
+#   8081  cloud-server-2  (non-owner)
+#   9000  minio           (browser/driver-reachable object storage)
+
+services:
+  minio:
+    environment:
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
+    ports:
+      - "9000:9000"
+
+  cloud-server:
+    # depends_on only orders start, not readiness; cloud-server fatals on boot if
+    # Postgres/Redis/MinIO aren't answering yet (EnsureBucket). Restart until they
+    # are. Same reasoning as docker-compose.e2e.yml.
+    restart: on-failure
+    environment:
+      # Presign the browser/driver upload URL against the host-reachable MinIO so
+      # the SigV4 host matches where the driver actually PUTs. Server-side blob
+      # ops still use the internal minio:9000 client. See handlers uploadPresigner.
+      MINIO_PUBLIC_ENDPOINT: "localhost:9000"
+      MINIO_PUBLIC_SECURE: "false"
+    ports:
+      - "8080:8080"
+
+  # Second, independent cloud node. Full copy of cloud-server's config MINUS the
+  # Traefik router labels (reached directly on :8081, not via the edge) and with
+  # its own published port. It never holds the printer socket -- the printer dials
+  # the `cloud-server` alias only -- so it is the deterministic "non-owner" node.
+  cloud-server-2:
+    build: ./services/cloud
+    restart: on-failure
+    depends_on:
+      - postgres
+      - redis
+      - minio
+    environment:
+      PORT: 8080
+      MTLS_PORT: 8443
+      MTLS_CA_CERT_PATH: /certs/ca-cert.pem
+      MTLS_CLOUD_CERT_PATH: /certs/cloud-server-cert.pem
+      MTLS_CLOUD_KEY_PATH: /certs/cloud-server-key.pem
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_SECURE: "false"
+      MINIO_PUBLIC_ENDPOINT: "localhost:9000"
+      MINIO_PUBLIC_SECURE: "false"
+      JWT_PRIVATE_KEY_PATH: /certs/jwt-private.pem
+      JWT_PUBLIC_KEY_PATH: /certs/jwt-public.pem
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+    volumes:
+      - ./infra/certs:/certs:ro
+    networks:
+      - automail
+    ports:
+      - "8081:8080"
+
+  printer:
+    environment:
+      # Hermetic full-system E2E: run the whole RSA/AES decrypt pipeline but skip
+      # the physical lp call (no printer on WSL/CI). The /dev/shm wipe assertion
+      # still holds -- DEV_MODE only skips the print, not the unlink+zero.
+      DEV_MODE: "true"
+      # Must equal the seeded mailbox_slots.id so dispatch eligibility finds the
+      # slot (plans/04: slot_occupancy keyed by "<slot_id>").
+      SLOT_ID: "22222222-2222-2222-2222-222222222222"

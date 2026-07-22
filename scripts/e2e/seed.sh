@@ -12,7 +12,15 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.e2e.yml)
+# Which compose files to resolve the running `postgres` service against. Defaults
+# to the Part 4b browser-E2E pair; the Part 5 full-system run (scripts/e2e/full.sh)
+# overrides it via E2E_COMPOSE_FILES so `exec postgres` targets the same project.
+if [ -n "${E2E_COMPOSE_FILES:-}" ]; then
+  read -ra COMPOSE_FILES <<<"$E2E_COMPOSE_FILES"
+else
+  COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.e2e.yml)
+fi
+COMPOSE=(docker compose "${COMPOSE_FILES[@]}")
 
 APP_KEY="$(grep '^APP_ENCRYPTION_KEY=' .env | cut -d= -f2-)"
 PUBKEY="$(cat infra/certs/printer-public.pem)"

@@ -136,6 +136,52 @@ not just the parts):
 Both are classic "each service is individually correct, the *seam* between them
 isn't" bugs — exactly what an end-to-end test exists to find.
 
+## Full-system E2E: proving the *distributed* seams
+
+The browser E2E above proves the product from a user's seat, but it runs a
+single cloud node, so it can't exercise the design's most interview-relevant
+claim: that the cloud scales horizontally because Redis — not any one process —
+is the dispatch fan-in and status fan-out backbone. Part 5 / `make test-e2e-full`
+closes that gap with a standalone Go driver (`e2e/`, zero external deps — it just
+speaks the public HTTP contract and the same crypto wire format the browser uses)
+against a **two-node** stack (`docker-compose.full.yml`).
+
+The whole test turns on one topological fact: the printer's dial-out mTLS socket
+lands on exactly one cloud node. We pin that by naming the two nodes — the
+printer only ever dials the `cloud-server` alias, so `cloud-server` is always the
+socket **owner** and `cloud-server-2` is always the **non-owner**. (The roadmap
+says `--scale cloud-server=2`; scaled replicas share one alias and can't each
+publish a host port, so a driver couldn't *deterministically* address the
+non-owner. Two named nodes exercise the identical property and make the targeting
+deterministic — the reasoning is written up in the compose file header.)
+
+With that pin, two status values become *proofs*, no log-scraping required:
+
+- **Dispatch fan-in.** The driver submits the job to the **non-owner**. A
+  `POST /jobs` returning `"dispatching"` is only reachable if that node's
+  `PUBLISH mailbox:<id>:dispatch` had a subscriber — and the *only* subscriber is
+  the owner node holding the socket. A non-owner with no live socket of its own
+  would see `receivers == 0`, revert the claim, and return `"queued"` instead. So
+  the single word `dispatching` from the non-owner *is* the cross-node fan-in.
+- **Status fan-out.** The driver opens the SSE stream on the **non-owner** too.
+  The handler's first event is a DB snapshot, but any *later* event can only have
+  arrived over the `job:<id>:status` channel — the printer emitted it on the
+  owner's socket, the owner published it, and Redis delivered it to the
+  non-owner. Requiring ≥2 events ending in `delivered` (the run saw
+  `[printing printing delivered]`) proves the status crossed the node boundary,
+  not just a local read.
+
+The same test also promotes `TestHandleDispatch_DeliversAndWipes` from a unit
+fake to the real stack: after `delivered`, it execs into the printer container
+and asserts `/dev/shm` holds no job file — the RAM-only plaintext invariant,
+verified end-to-end on the assembled product rather than in a decrypt unit test.
+
+Why a Go driver here instead of extending the Playwright suite: the two-node
+proof needs to address a *specific* node deterministically (submit here, stream
+there), which a browser going through one portal origin can't do; and the crypto
+the driver needs is byte-identical to the browser's, already proven equivalent by
+the Part 3 contract test, so nothing is lost by encrypting in Go.
+
 ## What's proven locally vs. what a real deployment adds
 
 All of the above runs on one laptop. What it deliberately *doesn't* reproduce:
