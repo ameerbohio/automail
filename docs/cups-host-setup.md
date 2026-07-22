@@ -30,6 +30,44 @@ image has no `lp` binary yet, and the Dockerfile itself says so).
 
 ---
 
+## First-deploy prerequisite: edge TLS certificate (not CUPS-specific)
+
+> Documented here until Goal T12 lands `docs/deploy-checklist.md`; this step
+> applies to every fresh host bring-up, printing or not.
+
+On a fresh host, `docker compose up` brings up the Traefik front door with
+`sniStrict: true` (`infra/traefik/dynamic.yml`). If no certificate matches the
+routed hostnames (`automail.local`, `api.automail.local`), Traefik **hard-rejects
+every TLS handshake** and the browser shows `ERR_SSL_UNRECOGNIZED_NAME_ALERT` —
+the connection never reaches the portal. The fix is to generate the self-signed
+edge cert **before** the first `up` (it is one of the `infra/certs/gen*.sh`
+scripts):
+
+```bash
+./infra/certs/gen-edge-certs.sh   # writes infra/traefik/edge-{cert,key}.pem
+```
+
+Notes:
+- The cert is **self-signed**, so browsers show a one-time "not secure" warning —
+  expected and fine for this deploy target. Only a *hard* TLS rejection is a bug.
+- It is a **separate trust domain** from the internal mTLS CA (`gen.sh`): the edge
+  cert secures browser ↔ Traefik; the mTLS PKI secures cloud ↔ printer. Do not
+  cross-wire them, and do not "fix" a missing edge cert by disabling `sniStrict`.
+- `scripts/e2e/bootstrap.sh` generates it automatically, so `make test-e2e{,-full}`
+  already have it; a plain production `docker compose up` needs the manual step
+  above (or run `bootstrap.sh` once).
+
+Verify after `up`:
+
+```bash
+curl -k --resolve automail.local:443:127.0.0.1 https://automail.local/ -o /dev/null -sS
+curl -k --resolve api.automail.local:443:127.0.0.1 https://api.automail.local/healthz -o /dev/null -sS
+# Both should complete the TLS handshake (self-signed, hence -k) rather than
+# fail with an unrecognized_name alert.
+```
+
+---
+
 ## Step 1 — Configure CUPS on the Proxmox VM host — ✅ DONE (2026-07-20)
 
 Completed and verified by the owner on the Proxmox VM that runs the Docker
