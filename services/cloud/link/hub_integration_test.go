@@ -31,12 +31,30 @@ func TestHub_RegisterSeedsStateAndDispatchReachesSocket(t *testing.T) {
 
 	hub := NewHub(rdb, nil) // Queries unused by register/state path
 
+	// hub.Accept upgrades to a WebSocket, which HIJACKS the connection --
+	// httptest.Server.Close() does not wait for hijacked conns, so this handler
+	// goroutine can outlive the test. Calling t.Logf from it would then race with
+	// testing's own teardown (a real, intermittent `-race` failure). Stash the
+	// error instead and report it from the test goroutine below.
+	acceptErr := make(chan error, 1)
 	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := hub.Accept(r.Context(), w, r); err != nil {
-			t.Logf("hub.Accept returned: %v", err)
+			select {
+			case acceptErr <- err:
+			default: // only the first error is interesting
+			}
 		}
 	}))
 	defer httpSrv.Close()
+	// Runs before httpSrv.Close() (defers are LIFO), but either way this only
+	// touches t from the test goroutine, while the test is still alive.
+	defer func() {
+		select {
+		case err := <-acceptErr:
+			t.Logf("hub.Accept returned: %v", err)
+		default:
+		}
+	}()
 
 	wsURL := "ws" + httpSrv.URL[len("http"):]
 
