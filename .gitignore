@@ -52,3 +52,6 @@ services/portal/.playwright/
 
 # Regenerated crypto-contract vectors (Goal T2); fixture.json IS committed
 testdata/crypto-contract/*.vector.json
+
+# Load-run reports (Goal T10); baseline.json + testdata/ ARE committed
+scripts/load/report/

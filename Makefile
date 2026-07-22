@@ -106,6 +106,19 @@ chaos: ## Resilience/chaos: kill each component in turn, prove exactly-once + re
 		echo "⚠ chaos skipped: no Docker daemon (Goal T9 needs the compose stack)"; exit 0; fi; \
 	bash scripts/e2e/chaos.sh
 
+.PHONY: load
+load: ## Load/perf: submission throughput + SSE fan-out boundedness vs baseline (Goal T10) — needs Docker
+	@if ! docker info >/dev/null 2>&1; then \
+		echo "⚠ load skipped: no Docker daemon (Goal T10 needs the compose stack)"; exit 0; fi; \
+	bash scripts/load/run.sh
+
+.PHONY: load-selftest
+load-selftest: ## Prove the load baseline detector catches a regression (no Docker needed)
+	@echo "check-baseline.py must FAIL on the deliberately-regressed fixture:"; \
+	if python3 scripts/load/check-baseline.py scripts/load/testdata/regressed-summary.json scripts/load/baseline.json; then \
+		echo "✗ detector did NOT flag the regression"; exit 1; \
+	else echo "✔ regression correctly detected (non-zero exit)"; fi
+
 .PHONY: ci
 ci: fmt-check lint test-race cover cover-portal ## Docker-independent local CI gate
 	@echo "✔ CI gates passed"

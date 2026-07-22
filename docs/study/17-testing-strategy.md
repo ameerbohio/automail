@@ -235,6 +235,59 @@ that leave the printer running stay under its slot cap, and the printer-restart
 scenario (which resets it) runs last. That's a note-to-self about *test* fixtures,
 not the product; a real mailbox's slot empties when mail is collected.
 
+## Load & performance: quantifying, and detecting regressions
+
+`make load` (Part 8) is the layer that replaces "it seems fast" with numbers, and
+— more importantly — with a **committed baseline** so a future change that makes
+things worse fails the build. It runs a single-node stack with pprof enabled
+(`docker-compose.load.yml`, `PPROF_ADDR` set for that profile only — never in the
+base compose or on a deploy host, since pprof exposes heap/goroutine dumps), and
+drives k6 from *inside* the compose network, because the cloud signs its presigned
+upload URLs for the internal `minio:9000` host.
+
+Three phases, each answering a different scaling question:
+
+- **Phase A — submission throughput.** Ramps the guest arrival rate through the
+  real three-call flow (upload-url → PUT ciphertext → `POST /jobs`), timing only
+  the submit. The `encrypted_key` is synthetic: the cloud stores it verbatim and
+  never decrypts it, so the zero-knowledge design is exactly what makes it safe to
+  load-test the submission path with junk key material.
+- **Phase B — SSE fan-out boundedness**, the most likely scaling surprise. Holds
+  N concurrent `/jobs/:id/stream` subscribers on one job while sampling goroutines
+  via pprof. The honest finding: `StreamJob` opens **one Redis subscription per
+  connection**, so goroutines grow ~linearly (~4 per subscriber ≈ handler +
+  go-redis read-loop + `sub.Channel()` pump). Linear growth is *by design*; the
+  bug worth catching is not returning to baseline. So the baseline gates growth
+  loosely and **residual tightly** — measured residual was *below* idle, i.e. no
+  per-connection leak. (A shared per-job subscription would flatten the curve —
+  a real optimisation, deliberately not done yet.)
+- **Phase C — dispatch backlog drain.** Phase A never touches the Redis Stream:
+  with a live printer, jobs go out via *immediate* dispatch. So Phase C stops the
+  printer, queues a burst (0 subscribers on `mailbox:<id>:dispatch` ⇒ the claim is
+  reverted and the job is enqueued), then restarts the printer and times the
+  consumer group draining the backlog to zero. The run guards against a silent
+  no-op: if nothing actually queued, the phase fails rather than reporting a
+  trivially-clean drain.
+
+**The baseline is the deliverable, not the numbers.** `check-baseline.py` compares
+each run against committed ceilings/floors and exits non-zero on a breach, and
+`make load-selftest` proves the detector actually bites by running it against a
+deliberately-regressed fixture (latency blowout, throughput collapse, stalled
+dispatch, and the classic unbounded-goroutine leak) and asserting it fails.
+Calibrating the bounds mattered: the first honest run showed ~3.97 goroutines per
+subscriber against a guessed ceiling of 3 — the *bound* was wrong, not the code,
+and widening it to 5 (with the reasoning written down) kept it strict enough that
+the regressed fixture still trips it.
+
+Two bugs the harness itself surfaced, both worth knowing as shell/ops lessons:
+`set -o pipefail` plus `curl … | head -1` makes curl die of SIGPIPE, so the
+pipeline reports failure even when the match succeeded and the `|| echo 0`
+fallback silently corrupted every goroutine reading; and a container writing into
+a bind-mounted host directory needs a matching uid — k6's summary export failed
+with "permission denied" yet k6 still **exited 0**, so the real failure only
+appeared much later as a missing file. Both are now fixed at the source, and the
+run fails fast with a pointed message if the export goes missing again.
+
 ## What's proven locally vs. what a real deployment adds
 
 All of the above runs on one laptop. What it deliberately *doesn't* reproduce:
