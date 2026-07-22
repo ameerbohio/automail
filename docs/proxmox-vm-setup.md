@@ -151,6 +151,45 @@ Ports the VM exposes to the LAN: **80** and **443** (Traefik). Everything else
 (Postgres 5432, Redis 6379, MinIO 9000/9001, cloud 8080/8443, printer 8444) is
 internal to the `automail` Docker network and is **not** published — by design.
 
+### Host-CPU compatibility (MinIO `x86-64-v2`)
+
+**Old host CPUs need MinIO's `-cpuv1` image — already pinned in
+`docker-compose.yml`, so no action is normally needed. Read this before ever
+bumping the MinIO tag.**
+
+Since `RELEASE.2023-11-01T01-57-10Z`, MinIO's *default* Docker image is based on
+RHEL9/UBI9, whose glibc **hard-requires the `x86-64-v2` micro-architecture
+baseline** (SSE4.2, POPCNT, …). Deploy hosts with a CPU older than ~2013 don't
+have those instructions. On such a host the default image crashes on boot with:
+
+```
+minio-1  | Fatal glibc error: CPU does not support x86-64-v2
+```
+
+and because `cloud-server` `depends_on` `minio`, that single crash takes the
+whole stack down (`docker compose ps` shows both `minio` and `cloud-server`
+absent while postgres/redis/printer/portal/traefik are up).
+
+- **This is not a Proxmox setting.** The recommended CPU Type `host` (§2) passes
+  the *real* host CPU through, so a VM on an old host inherits the missing
+  instructions. No QEMU CPU model can add instructions the physical CPU lacks.
+- **Known-affected target:** the AMD A6-3600 "Llano" (2011, FM1) — the CPU this
+  project's Proxmox host runs.
+- **Fix (already applied):** `docker-compose.yml` pins the MinIO service to a
+  **`-cpuv1`** image (`minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1`). MinIO
+  publishes this parallel variant on a v1-compiled base for exactly these CPUs
+  (github.com/minio/minio issue #18365). It's the *same* MinIO — no feature or
+  CVE-patch rollback — and it runs on modern CPUs too, so the pin is safe
+  everywhere. **Do not "modernize" it back to `:latest` or a bare `RELEASE` tag**
+  unless the deploy host is known to support `x86-64-v2`.
+- **Verify on the host** after pulling this pin:
+  ```sh
+  docker compose up -d minio && docker compose logs minio
+  # expect the startup banner, NOT "Fatal glibc error: CPU does not support x86-64-v2"
+  ```
+
+To check a host's level directly: `/lib64/ld-linux-x86-64.so.2 --help | grep -A2 'Subdirectories'` (look for `x86-64-v2 (supported/unsupported)`), or inspect `/proc/cpuinfo` for the `sse4_2` and `popcnt` flags.
+
 ### Verify
 1. Browse to `https://automail.local` → portal loads.
 2. Run the guest flow (upload a PDF → get a guest token → watch `/track` go
