@@ -14,12 +14,21 @@ export interface UploadURL {
   upload_url: string;
   blob_ref: string;
   expires_in: number;
+  served_by?: string;
 }
 
 export interface CreateJobResult {
   job_id: string;
   status: string;
   guest_token?: string;
+  served_by?: string;
+}
+
+// servedByNode reads the cloud node's name off a proxied response (see
+// lib/proxy.ts NODE_HEADER). Purely informational -- the portal displays it to
+// show that the backend is N stateless nodes, and nothing depends on it.
+function servedByNode(res: Response): string | undefined {
+  return res.headers.get("x-automail-node") ?? undefined;
 }
 
 // jsonOrThrow surfaces the cloud server's own error message (its {error, code}
@@ -63,7 +72,7 @@ export async function requestUploadURL(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ recipient_id: recipientId, filename }),
   });
-  return jsonOrThrow<UploadURL>(res);
+  return { ...(await jsonOrThrow<UploadURL>(res)), served_by: servedByNode(res) };
 }
 
 // uploadBlob PUTs the encrypted blob directly to MinIO's pre-signed URL. The
@@ -103,5 +112,8 @@ export async function createJob(
     },
     body: JSON.stringify(input),
   });
-  return jsonOrThrow<CreateJobResult>(res);
+  return {
+    ...(await jsonOrThrow<CreateJobResult>(res)),
+    served_by: servedByNode(res),
+  };
 }

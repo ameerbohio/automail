@@ -10,6 +10,29 @@ import (
 	"automail/cloud/jwtutil"
 )
 
+// NodeHeader names the cloud node that served a response. plans/03-scaling.md
+// runs N stateless cloud nodes behind Traefik, and NODE_ID already identifies
+// each one as its Redis Streams consumer -- this just surfaces the same name
+// over HTTP so the portal can show a sender which node took their submission.
+//
+// It is metadata only (a consumer name, never a secret) and it never carries
+// anything about the document. It does disclose topology, though: see
+// plans/13-v2-roadmap.md "Richer request-path observability" for why a
+// non-demo deployment would gate this behind a flag or emit an opaque id.
+const NodeHeader = "X-Automail-Node"
+
+// nodeHeader stamps NodeHeader on every response. Wrapped around the whole
+// mux, so it covers the SSE stream too -- the header is set before any
+// handler writes, which is what Go requires for it to reach the wire.
+func nodeHeader(nodeID string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set(NodeHeader, nodeID)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // optionalAuth extracts sender identity from a Bearer token if present,
 // without rejecting the request if it's absent or invalid -- POST /jobs
 // and /jobs/upload-url are "auth optional" per plans/09-api-contracts.md:

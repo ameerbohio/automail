@@ -282,8 +282,10 @@ func main() {
 	addr := ":" + port
 	log.Printf("cloud-server listening on %s", addr)
 	server := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
+		Addr: addr,
+		// nodeHeader wraps the whole mux so every response names the node that
+		// served it -- the portal surfaces this to show the multi-node backend.
+		Handler:           nodeHeader(nodeID)(mux),
 		ReadHeaderTimeout: 10 * time.Second, // bound slow-header (Slowloris) clients
 	}
 	if err := server.ListenAndServe(); err != nil {
