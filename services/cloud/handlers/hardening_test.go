@@ -1,15 +1,16 @@
 package handlers
 
-// Nasty-row edge cases for guest-token hashing (Testing Goal T4 / Part 1):
+// Nasty-row edge cases for opaque-token hashing (Testing Goal T4 / Part 1):
 // determinism, a URL-safe fixed-width digest for arbitrary input, and that
-// newGuestToken's returned hash always matches hashGuestToken of its raw token.
+// newOpaqueToken's returned hash always matches hashToken of its raw token.
+// (These cover the SHAPE of the digest; tokens_test.go pins its VALUE.)
 
 import (
 	"strings"
 	"testing"
 )
 
-func TestHashGuestToken_NastyRows(t *testing.T) {
+func TestHashToken_NastyRows(t *testing.T) {
 	inputs := []string{
 		"",                        // empty
 		"a",                       // single byte
@@ -18,7 +19,7 @@ func TestHashGuestToken_NastyRows(t *testing.T) {
 		"with\x00null\x00bytes",   // embedded NULs
 	}
 	for _, in := range inputs {
-		h := hashGuestToken(in)
+		h := hashToken(in)
 		// SHA-256 -> RawURLEncoding is always 43 chars, URL-safe, no padding.
 		if len(h) != 43 {
 			t.Fatalf("hash of %q is %d chars, want 43", in, len(h))
@@ -26,28 +27,28 @@ func TestHashGuestToken_NastyRows(t *testing.T) {
 		if strings.ContainsAny(h, "+/=") {
 			t.Fatalf("hash %q is not URL-safe base64", h)
 		}
-		if h != hashGuestToken(in) {
-			t.Fatalf("hashGuestToken not deterministic for %q", in)
+		if h != hashToken(in) {
+			t.Fatalf("hashToken not deterministic for %q", in)
 		}
 	}
 	// Distinct inputs must not collide at this trivial level.
-	if hashGuestToken("token-a") == hashGuestToken("token-b") {
+	if hashToken("token-a") == hashToken("token-b") {
 		t.Fatal("distinct tokens hashed to the same value")
 	}
 }
 
-func TestNewGuestToken_HashMatchesRaw(t *testing.T) {
+func TestNewOpaqueToken_HashMatchesRaw(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 100; i++ {
-		raw, hash, err := newGuestToken()
+		raw, hash, err := newOpaqueToken()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if hash != hashGuestToken(raw) {
-			t.Fatal("newGuestToken hash does not match hashGuestToken(raw)")
+		if hash != hashToken(raw) {
+			t.Fatal("newOpaqueToken hash does not match hashToken(raw)")
 		}
 		if seen[raw] {
-			t.Fatalf("newGuestToken produced a duplicate raw token: %q", raw)
+			t.Fatalf("newOpaqueToken produced a duplicate raw token: %q", raw)
 		}
 		seen[raw] = true
 	}

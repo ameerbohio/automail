@@ -39,9 +39,9 @@ import (
 	"nhooyr.io/websocket/wsjson"
 )
 
-// hashGuestTokenForTest mirrors handlers.hashGuestToken (SHA-256, base64
-// RawURL) -- recomputed here rather than exported, so the test asserts the
-// documented storage format independently of the implementation.
+// hashGuestTokenForTest mirrors handlers.hashToken (SHA-256, base64 RawURL)
+// -- recomputed here rather than exported, so the test asserts the documented
+// storage format independently of the implementation.
 func hashGuestTokenForTest(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
