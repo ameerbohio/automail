@@ -2,10 +2,7 @@ package handlers
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -22,27 +19,47 @@ import (
 
 const refreshTokenTTL = 7 * 24 * time.Hour
 
-func newRefreshToken() (raw string, hash string, err error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", "", err
-	}
-	raw = base64.RawURLEncoding.EncodeToString(buf)
-	sum := sha256.Sum256([]byte(raw))
-	hash = base64.RawURLEncoding.EncodeToString(sum[:])
-	return raw, hash, nil
-}
+// The refresh cookie's name and path are a CROSS-LANGUAGE contract, not private
+// details of this file:
+//
+//	services/portal/lib/proxy.ts   rewrites `Path=/auth/refresh` -> `Path=/` with
+//	                               a regex, so the browser returns the cookie to
+//	                               the portal's own /api/auth/refresh proxy
+//	services/portal/middleware.ts  gates account pages on the cookie NAME
+//
+// Change either value here and the portal's regex silently stops matching: the
+// cookie keeps Path=/auth/refresh, the browser stops sending it, and every
+// session fails to survive a page reload — with no error on either side. See
+// plans/14-refactoring-backlog.md Goal R11.
+const (
+	refreshCookieName = "refresh_token"
+	refreshCookiePath = "/auth/refresh"
+)
 
-func setRefreshCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    token,
-		Path:     "/auth/refresh",
-		Expires:  expiresAt,
+// refreshCookie is the one place the cookie's attributes are written. Set and
+// clear MUST agree on name and path or the browser will not delete the cookie
+// on logout — which is why they are built here rather than typed out twice.
+func refreshCookie(value string, expires time.Time, maxAge int) *http.Cookie {
+	return &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    value,
+		Path:     refreshCookiePath,
+		Expires:  expires,
+		MaxAge:   maxAge,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
-	})
+	}
+}
+
+// setRefreshCookie issues the rotating refresh cookie (expiry-dated, no Max-Age).
+func setRefreshCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
+	http.SetCookie(w, refreshCookie(token, expiresAt, 0))
+}
+
+// clearRefreshCookie deletes it (Max-Age=0, no Expires) on logout.
+func clearRefreshCookie(w http.ResponseWriter) {
+	http.SetCookie(w, refreshCookie("", time.Time{}, -1))
 }
 
 type loginRequest struct {
@@ -63,7 +80,7 @@ func (s *Server) issueSession(w http.ResponseWriter, ctx context.Context, sender
 	if err != nil {
 		return tokenResponse{}, err
 	}
-	rawRefresh, refreshHash, err := newRefreshToken()
+	rawRefresh, refreshHash, err := newOpaqueToken()
 	if err != nil {
 		return tokenResponse{}, err
 	}
@@ -124,13 +141,12 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 // successful call immediately revokes it and issues a new one
 // (plans/02-security.md "Rotation").
 func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("refresh_token")
+	cookie, err := r.Cookie(refreshCookieName)
 	if err != nil {
 		WriteError(w, http.StatusUnauthorized, "missing refresh token", "UNAUTHORIZED")
 		return
 	}
-	sum := sha256.Sum256([]byte(cookie.Value))
-	hash := base64.RawURLEncoding.EncodeToString(sum[:])
+	hash := hashToken(cookie.Value)
 
 	active, err := s.Queries.GetActiveRefreshToken(r.Context(), hash)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && active.ExpiresAt.Before(time.Now())) {
@@ -165,20 +181,10 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 // and clears the cookie; the access token is left to expire naturally --
 // it's short-lived enough not to need a blocklist (plans/02-security.md).
 func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie("refresh_token"); err == nil {
-		sum := sha256.Sum256([]byte(cookie.Value))
-		hash := base64.RawURLEncoding.EncodeToString(sum[:])
-		_ = s.Queries.RevokeRefreshTokenByHash(r.Context(), hash)
+	if cookie, err := r.Cookie(refreshCookieName); err == nil {
+		_ = s.Queries.RevokeRefreshTokenByHash(r.Context(), hashToken(cookie.Value))
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Path:     "/auth/refresh",
-		MaxAge:   -1,
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
-	})
+	clearRefreshCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 

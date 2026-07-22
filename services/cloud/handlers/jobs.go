@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
@@ -73,28 +71,6 @@ type createJobResponse struct {
 	GuestToken string `json:"guest_token,omitempty"`
 }
 
-// hashGuestToken is the single definition of how a raw guest token maps
-// to the value stored in jobs.guest_token_hash. Shared by token creation
-// (newGuestToken, below) and verification (StreamJob's ?token= check) so
-// the two sides can never drift.
-func hashGuestToken(raw string) string {
-	sum := sha256.Sum256([]byte(raw))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
-}
-
-// newGuestToken returns a random URL-safe token and its SHA-256 hash.
-// Only the hash is ever stored (plans/02-security.md "Refresh token
-// stored as a hash" applies the same pattern here) -- a stolen DB dump
-// yields no usable token.
-func newGuestToken() (raw string, hash string, err error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", "", err
-	}
-	raw = base64.RawURLEncoding.EncodeToString(buf)
-	return raw, hashGuestToken(raw), nil
-}
-
 // CreateJob handles POST /jobs. Auth optional: a Bearer token sets
 // sender_id; otherwise the job is a guest submission with a one-time
 // guest_token (plans/09-api-contracts.md). Every job is inserted as
@@ -156,7 +132,9 @@ func (s *Server) CreateJob(w http.ResponseWriter, r *http.Request) {
 	if senderID, ok := authctx.SenderID(r.Context()); ok {
 		params.SenderID = uuid.NullUUID{UUID: senderID, Valid: true}
 	} else {
-		raw, hash, err := newGuestToken()
+		// Guest submission: the raw token is shown to the sender exactly once
+		// and only its digest is stored (tokens.go).
+		raw, hash, err := newOpaqueToken()
 		if err != nil {
 			WriteError(w, http.StatusInternalServerError, "could not generate guest token", "INTERNAL")
 			return
@@ -352,7 +330,7 @@ func (s *Server) StreamJob(w http.ResponseWriter, r *http.Request) {
 //     are unguessable UUIDs, and 404 avoids confirming to another
 //     account that the job exists at all.
 //   - Guest token: SHA-256 of ?token= must match jobs.guest_token_hash
-//     (the same hash newGuestToken stored at submission). Compared
+//     (the same hash newOpaqueToken stored at submission). Compared
 //     constant-time as hygiene, though hash comparison isn't practically
 //     timing-attackable. A wrong token is 403 GUEST_TOKEN_INVALID.
 //
@@ -365,7 +343,7 @@ func authorizeStream(w http.ResponseWriter, r *http.Request, job db.GetJobForStr
 
 	token := r.URL.Query().Get("token")
 	if token != "" && job.GuestTokenHash.Valid &&
-		subtle.ConstantTimeCompare([]byte(hashGuestToken(token)), []byte(job.GuestTokenHash.String)) == 1 {
+		subtle.ConstantTimeCompare([]byte(hashToken(token)), []byte(job.GuestTokenHash.String)) == 1 {
 		return true
 	}
 
