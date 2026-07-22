@@ -30,7 +30,7 @@ fmt-check: ## Fail if any Go code is not gofmt-clean
 
 .PHONY: vet
 vet: ## go vet both Go modules
-	@for m in $(GO_MODULES); do echo "vet $$m"; (cd $$m && go vet ./...); done
+	@for m in $(GO_MODULES); do echo "vet $$m"; (cd $$m && go vet ./...) || exit 1; done
 
 .PHONY: lint
 lint: vet ## Vet Go + typecheck the portal (next lint once configured, Goal T6)
@@ -41,11 +41,11 @@ lint: vet ## Vet Go + typecheck the portal (next lint once configured, Goal T6)
 
 .PHONY: test-unit
 test-unit: ## Fast unit tests, both Go modules
-	@for m in $(GO_MODULES); do echo "test $$m"; (cd $$m && go test ./... -count=1); done
+	@for m in $(GO_MODULES); do echo "test $$m"; (cd $$m && go test ./... -count=1) || exit 1; done
 
 .PHONY: test-race
 test-race: ## Unit tests under the race detector (goroutine-heavy code)
-	@for m in $(GO_MODULES); do echo "race $$m"; (cd $$m && go test ./... -race -count=1); done
+	@for m in $(GO_MODULES); do echo "race $$m"; (cd $$m && go test ./... -race -count=1) || exit 1; done
 
 .PHONY: cover
 cover: ## Go coverage with a ratcheting floor (scripts/coverage.sh)
@@ -74,9 +74,9 @@ scan: ## Security scanners: govulncheck + gosec + gitleaks (npm audit is informa
 	@command -v gosec       >/dev/null || go install github.com/securego/gosec/v2/cmd/gosec@latest
 	@command -v gitleaks    >/dev/null || go install github.com/zricethezav/gitleaks/v8@latest
 	@echo "── govulncheck (Go stdlib + dep CVEs, reachability) ──"
-	@for m in $(GO_MODULES); do echo "$$m:"; (cd $$m && govulncheck ./...); done
+	@for m in $(GO_MODULES); do echo "$$m:"; (cd $$m && govulncheck ./...) || exit 1; done
 	@echo "── gosec (SAST) ── excludes: -exclude-generated (sqlc files); G104 unhandled-err + G706 log-injection (low-value, noisy). Intentional cases are annotated inline with justified #nosec."
-	@for m in $(GO_MODULES); do echo "$$m:"; (cd $$m && gosec -quiet -exclude-generated -exclude=G104,G706 ./...); done
+	@for m in $(GO_MODULES); do echo "$$m:"; (cd $$m && gosec -quiet -exclude-generated -exclude=G104,G706 ./...) || exit 1; done
 	@echo "── gitleaks (secrets in git history; test fixtures allowlisted in .gitleaks.toml) ──"
 	@gitleaks git --no-banner -c .gitleaks.toml
 	@echo "── npm audit (portal, INFORMATIONAL) ── next@14.2.5 has advisories needing an owner-approved dependency bump; not a blocking gate."
@@ -86,7 +86,7 @@ scan: ## Security scanners: govulncheck + gosec + gitleaks (npm audit is informa
 test-integration: ## Integration vs real Postgres/Redis/MinIO — needs Docker (Goal T5)
 	@if ! docker info >/dev/null 2>&1; then \
 		echo "⚠ test-integration skipped: no Docker daemon (populated in Goal T5)"; exit 0; fi; \
-	for m in $(GO_MODULES); do (cd $$m && go test -tags=integration ./... -count=1); done
+	for m in $(GO_MODULES); do (cd $$m && go test -tags=integration ./... -count=1) || exit 1; done
 
 .PHONY: test-e2e
 test-e2e: ## Portal browser E2E (Playwright vs a clean compose stack) — needs Docker (Goal T7)
