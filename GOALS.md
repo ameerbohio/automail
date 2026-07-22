@@ -14,6 +14,14 @@ hardening the finished build to production quality locally. It has its own run
 prompt and is **not** gated by the CUPS `blocked-on-owner` goal — run it
 separately from the phase track above.
 
+There is a third, independent **Refactoring Track** (Goals R1–R11) in
+[plans/14-refactoring-backlog.md](plans/14-refactoring-backlog.md) — pure
+duplication removal with zero behaviour change, plus a code-health scorecard.
+It lives in its own file (with its own run prompt, process rules and status log)
+rather than here, because its goal bodies carry the evidence and the traps for
+each change and would bury this file. It gates nothing and is gated by nothing;
+run it whenever the tree is clean.
+
 ## Process Rules (apply to every goal)
 
 1. **Source of truth**: `plans/` is the specification. Read the relevant plan
