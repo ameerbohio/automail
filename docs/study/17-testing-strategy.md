@@ -362,6 +362,53 @@ really required, the script stops checking it; if it is, `make deploy-smoke` fai
 with the exact remediation command. Documentation that is also a test is the only
 kind that stays true.
 
+## The last untested hop: making `lp` testable without a printer (demo images)
+
+Every suite above stops at the same wall. `DEV_MODE=true` skips exactly one line
+-- the `exec.Command("lp", ...)` in `print.go` -- and every automated profile in
+this repo sets it, because CI has no printer. So the single call that turns a
+decrypted PDF into paper was the one call nothing ever made. "Delivered" in a
+green test meant "we would have printed", not "we printed".
+
+The way in was noticing that the printer image ships **no `/etc/cups`**. That
+means `lp` has no configured server and falls back to `CUPS_SERVER` -- so it will
+talk to a cupsd **over the network**, not only through the host's Unix socket.
+A CUPS container on the compose network therefore exercises the real call with no
+host CUPS, no root, and no USB device: `DEV_MODE=false`, `lp` genuinely runs,
+cupsd genuinely accepts the job, and a capture backend records the bytes so they
+can be compared against what was decrypted. Everything upstream of the ink is
+real. That is strictly more than the previous state, which tested none of it.
+
+Three things went wrong on the way, and each is the kind of failure that reads as
+success:
+
+- **A completed CUPS job proves nothing.** The first attempt pointed the queue at
+  `file:///out/...`; jobs came back `job-completed-successfully` while writing
+  nothing anywhere, because alpine's `cups` package ships no `file` backend at
+  all. Had the demo asserted on job state rather than on bytes, it would have
+  been green and worthless.
+- **cupsd rejects unknown `Host:` headers.** A client reaching it by container
+  name gets `invalid Host: field "cups:631"` server-side -- but the *client*
+  reports `add '/version=1.1' to server name`, which sends you debugging an IPP
+  version negotiation problem that does not exist. The fix is `ServerAlias` in
+  `cupsd.conf`. Worth remembering: the error you are shown and the error that
+  happened are different errors.
+- **CUPS refuses to run a group- or world-writable backend**, silently declining
+  rather than explaining.
+
+The assertion that matters is therefore byte equality: the marker embedded in the
+submitted PDF must appear in what the queue received, while the blob uploaded to
+object storage must *not* contain it, and `/dev/shm` must be empty afterwards.
+Those three together are the project's whole claim in one run -- the server held
+only ciphertext, the correct plaintext reached the printer, and it was wiped from
+RAM before the status went out.
+
+What remains simulated is the final device. The capture backend stands in for the
+Canon, and the queue keeps the same name in both cases, so moving to real
+hardware is a device-URI change and nothing in the application configuration
+moves. Being precise about which hop is still simulated is the point: this proves
+the print *path*, not the printer.
+
 ## What's proven locally vs. what a real deployment adds
 
 All of the above runs on one laptop. What it deliberately *doesn't* reproduce:

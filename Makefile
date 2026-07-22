@@ -106,6 +106,18 @@ chaos: ## Resilience/chaos: kill each component in turn, prove exactly-once + re
 		echo "⚠ chaos skipped: no Docker daemon (Goal T9 needs the compose stack)"; exit 0; fi; \
 	bash scripts/e2e/chaos.sh
 
+.PHONY: demo
+demo: ## Public demo: whole stack + Cloudflare tunnel, one URL for a phone — needs Docker (PUBLIC!)
+	@bash scripts/demo/up.sh
+
+.PHONY: demo-print
+demo-print: ## Same as `demo` but with REAL printing (needs a working host CUPS queue)
+	@PRINT=1 bash scripts/demo/up.sh
+
+.PHONY: demo-down
+demo-down: ## Tear the public demo down and verify nothing is left exposed
+	@bash scripts/demo/down.sh
+
 .PHONY: deploy-smoke
 deploy-smoke: ## Deployment parity: production-profile stack driven through the HTTPS edge (Goal T12) — needs Docker
 	@if ! docker info >/dev/null 2>&1; then \
