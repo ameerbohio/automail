@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"automail/cloud/store"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"nhooyr.io/websocket"
@@ -81,7 +83,7 @@ func TestHub_RegisterSeedsStateAndDispatchReachesSocket(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	var raw string
 	for time.Now().Before(deadline) {
-		raw, err = rdb.Get(ctx, "mailbox:"+mailboxID+":state").Result()
+		raw, err = rdb.Get(ctx, store.KeyPrinterState(mailboxID)).Result()
 		if err == nil {
 			break
 		}
@@ -99,7 +101,7 @@ func TestHub_RegisterSeedsStateAndDispatchReachesSocket(t *testing.T) {
 	// channel the hub subscribed to on this mailbox's behalf, and check
 	// it arrives down the printer's socket as a dispatch frame.
 	dispatchPayload := `{"type":"dispatch","job_id":"job-42","encrypted_key":"abc","blob_url":"https://example.invalid/blob"}`
-	receivers, err := rdb.Publish(ctx, "mailbox:"+mailboxID+":dispatch", dispatchPayload).Result()
+	receivers, err := rdb.Publish(ctx, store.ChanDispatch(mailboxID), dispatchPayload).Result()
 	if err != nil {
 		t.Fatalf("publish dispatch: %v", err)
 	}

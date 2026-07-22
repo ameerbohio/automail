@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"automail/cloud/store"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -16,13 +18,12 @@ import (
 // to reclaim and retry.
 const claimMinIdle = 60 * time.Second
 
-// availablePattern subscribes once to every mailbox's availability
-// channel via PSUBSCRIBE rather than one SUBSCRIBE per mailbox_id: the
-// dispatcher has no registry of which mailboxes exist (that's exactly the
-// kind of authoritative state plans/03-scaling.md says nodes must not
-// hold), so a pattern subscription is what lets it react to any printer
-// going idle without first discovering its ID.
-const availablePattern = "mailbox:*:available"
+// The dispatcher subscribes once to every mailbox's availability channel via
+// PSUBSCRIBE (store.PatternAvailable) rather than one SUBSCRIBE per
+// mailbox_id: it has no registry of which mailboxes exist (that's exactly the
+// kind of authoritative state plans/03-scaling.md says nodes must not hold),
+// so a pattern subscription is what lets it react to any printer going idle
+// without first discovering its ID.
 
 // Dispatcher is the one-per-node goroutine that drains jobs:pending as
 // printers become available, per plans/05-cloud-server.md "Dispatcher
@@ -50,7 +51,7 @@ func (di *Dispatcher) EnsureGroup(ctx context.Context) error {
 // crashed-node leftovers via XAUTOCLAIM. Intended to be started once per
 // node in a goroutine from main.go.
 func (di *Dispatcher) Run(ctx context.Context) {
-	sub := di.Deps.Redis.PSubscribe(ctx, availablePattern)
+	sub := di.Deps.Redis.PSubscribe(ctx, store.PatternAvailable)
 	defer sub.Close()
 	ch := sub.Channel()
 

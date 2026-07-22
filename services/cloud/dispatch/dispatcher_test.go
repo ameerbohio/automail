@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"automail/cloud/store"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -58,7 +60,7 @@ func TestDispatcher_BlockedRetryStaysPendingWithoutDuplicating(t *testing.T) {
 	// otherwise the event could fire before anyone's listening.
 	time.Sleep(100 * time.Millisecond)
 
-	receivers, err := rdb.Publish(ctx, "mailbox:"+mailboxID+":available", "1").Result()
+	receivers, err := rdb.Publish(ctx, store.ChanAvailable(mailboxID), "1").Result()
 	if err != nil {
 		t.Fatalf("publish available: %v", err)
 	}

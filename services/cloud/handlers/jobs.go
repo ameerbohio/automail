@@ -17,6 +17,7 @@ import (
 	"automail/cloud/db"
 	"automail/cloud/dispatch"
 	"automail/cloud/minioclient"
+	"automail/cloud/store"
 
 	"github.com/google/uuid"
 )
@@ -281,7 +282,7 @@ func (s *Server) StreamJob(w http.ResponseWriter, r *http.Request) {
 	// two sources overlap instead of gap: the worst case is seeing the
 	// same transition twice (once from the snapshot, once from pub/sub),
 	// and duplicate status events are harmless to render.
-	sub := s.Redis.Subscribe(r.Context(), "job:"+jobID.String()+":status")
+	sub := s.Redis.Subscribe(r.Context(), store.ChanJobStatus(jobID.String()))
 	defer sub.Close()
 	if _, err := sub.Receive(r.Context()); err != nil {
 		WriteError(w, http.StatusInternalServerError, "could not subscribe to status channel", "INTERNAL")

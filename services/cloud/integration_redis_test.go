@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"automail/cloud/dispatch"
+	"automail/cloud/store"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -197,7 +198,7 @@ func TestIntegration_PubSubCrossConnection(t *testing.T) {
 	t.Run("pattern PSUBSCRIBE", func(t *testing.T) {
 		// Mirrors dispatcher.availablePattern: the dispatcher subscribes to
 		// every mailbox's availability channel without knowing the IDs.
-		psub := subscriberConn.PSubscribe(ctx, "mailbox:*:available")
+		psub := subscriberConn.PSubscribe(ctx, store.PatternAvailable)
 		defer psub.Close()
 		if _, err := psub.Receive(ctx); err != nil {
 			t.Fatalf("psubscribe confirm: %v", err)
@@ -205,12 +206,12 @@ func TestIntegration_PubSubCrossConnection(t *testing.T) {
 		ch := psub.Channel()
 
 		mailboxID := uuid.NewString()
-		if err := publisher.Publish(ctx, "mailbox:"+mailboxID+":available", "1").Err(); err != nil {
+		if err := publisher.Publish(ctx, store.ChanAvailable(mailboxID), "1").Err(); err != nil {
 			t.Fatalf("publish available: %v", err)
 		}
 		select {
 		case msg := <-ch:
-			if msg.Channel != "mailbox:"+mailboxID+":available" {
+			if msg.Channel != store.ChanAvailable(mailboxID) {
 				t.Fatalf("channel = %q, want the available channel for %s", msg.Channel, mailboxID)
 			}
 		case <-time.After(5 * time.Second):
