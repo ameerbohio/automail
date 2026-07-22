@@ -9,7 +9,7 @@ services:
     # TLS + middleware) -- every request 404s regardless of host/protocol.
     # v3.4 vendors a client new enough to negotiate correctly. Pinned (not
     # :latest) for reproducible deploys.
-    image: traefik:v3.4
+    image: traefik:v3.6
     environment:
       - DOCKER_API_VERSION=1.46  # Forces Traefik to use a supported API version
     command:
