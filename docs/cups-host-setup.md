@@ -1,12 +1,13 @@
 # CUPS Host Setup — Phase 10 (Real Printing)
 
-**Status: host prerequisites DONE (2026-07-20) — the remaining work is the code
-side (Steps 2–4).** This is the owner checklist referenced by GOALS.md Goal 6.
-It is a list of steps for a human to perform on the deployment host — the agent
-does not guess at or apply host configuration. The owner completed and verified
-Step 1 directly on the Proxmox VM (see the "Done" block below); Steps 2–5 (the
-container image, compose wiring, and `DEV_MODE=false` flip) are the code changes
-Goal 6 still covers.
+**Status: DONE — verified with real paper on the Proxmox VM (2026-07-23).**
+This is the owner checklist referenced by GOALS.md Goal 6, now fully closed:
+Step 1 (host prerequisites) was completed and verified directly on the Proxmox
+VM on 2026-07-20; Steps 2–4 (container image, compose wiring, `DEV_MODE=false`)
+landed in commit a8febee the same day; Step 5 (physical print Verify) closed
+2026-07-23 after fixing an unrelated bug in the public-demo tooling that was
+silently swallowing print jobs — see the note at the end of this doc and
+GOALS.md's Status Log for the full story.
 
 ## What is already done (in code)
 
@@ -197,10 +198,30 @@ something to default silently. Whichever option is chosen should be recorded in
 | Where | Change | Status |
 |---|---|---|
 | Proxmox VM host | Install CUPS, add + test the physical printer queue (`Canon_MF240`) | ✅ done 2026-07-20 |
-| `services/printer/Dockerfile` | `apk add --no-cache cups-client` in the final stage | pending (Goal 6) |
-| `docker-compose.yml` (printer) | Mount `/run/cups/cups.sock` **or** set `CUPS_SERVER` | pending (Goal 6) |
-| `docker-compose.yml` / `.env` | `DEV_MODE=false`, `PRINTER_NAME=Canon_MF240` | pending (Goal 6) |
+| `services/printer/Dockerfile` | `apk add --no-cache cups-client` in the final stage | ✅ done 2026-07-20 (a8febee) |
+| `docker-compose.yml` (printer) | Mount `/run/cups/cups.sock` **or** set `CUPS_SERVER` | ✅ done 2026-07-20 (a8febee) |
+| `docker-compose.yml` / `.env` | `DEV_MODE=false`, `PRINTER_NAME=Canon_MF240` | ✅ done 2026-07-20 (a8febee) |
+| Physical print Verify (paper out, correct content) | ✅ done 2026-07-23 (see note below) |
 | CUPS config (owner decision) | Spool-to-disk hardening per the security note | pending (owner decision) |
 
 No changes to `print.go`'s logic are required — the `lp` invocation, tmpfs
 write, and unlink-before-delivered are already implemented and unit-tested.
+
+---
+
+## Note: a public-demo-only bug blocked the first physical-print attempt
+
+Not a problem with the setup above — the host queue was correct and working
+(`echo test | lp -d Canon_MF240` printed fine) the whole time. The blocker was
+in `docker-compose.demo-print.yml` (used by `scripts/demo/up.sh` for the
+public-demo-plus-real-printing combination, `PRINT=host`): it hardcoded the
+printer service's `CUPS_SERVER` as the **literal** `cups`, so the script's
+`export CUPS_SERVER=""` (meant to fall back to this doc's host-socket setup)
+had no effect — Compose only lets a shell variable override a service's
+`environment:` entry when the compose file itself interpolates `${VAR}`; a
+literal string ignores the shell entirely. Every `PRINT=host` job was silently
+captured inside the ephemeral demo `cups` container instead of reaching the
+real printer. Fixed by changing the literal to `${CUPS_SERVER-cups}` (the `-`
+form only defaults when the variable is *unset*, preserving an intentionally
+empty override). Full root-cause writeup in `GOALS.md`'s Status Log,
+2026-07-23 / Goal 6 entry.
