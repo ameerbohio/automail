@@ -21,7 +21,6 @@ services:
       # is therefore a host prerequisite; see docs/deploy-checklist.md §0.
       - DOCKER_API_VERSION=1.46
     command:
-      - "--log.level=DEBUG"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.file.directory=/etc/traefik/dynamic"
