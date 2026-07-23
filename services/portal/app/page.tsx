@@ -40,6 +40,14 @@ interface Submitted {
 // is a cluster, and no node holds session state that would stop it.
 function ServedBy({ nodes }: { nodes: string[] }) {
   if (nodes.length === 0) return null;
+  // "neither" is only correct for exactly two, and the common case is one
+  // node, so the closing clause has to follow the count.
+  const held =
+    nodes.length === 1
+      ? "it never held your plaintext."
+      : nodes.length === 2
+        ? "neither held your plaintext."
+        : "none of them held your plaintext.";
   return (
     <p className="node-chip">
       <IconNode size={15} />
@@ -51,7 +59,8 @@ function ServedBy({ nodes }: { nodes: string[] }) {
             <code>{n}</code>
           </span>
         ))}
-        {" — neither held your plaintext."}
+        {" — "}
+        {held}
       </span>
     </p>
   );
@@ -363,11 +372,11 @@ export default function Home() {
           <span className="dropzone-icon">
             {file ? <IconCheck size={19} /> : <IconUpload size={19} />}
           </span>
-          <span>
+          <span className="dropzone-text">
             <span className="dropzone-title">
               {file ? file.name : "Drop a PDF here, or browse"}
             </span>
-            <span className="muted" style={{ display: "block" }}>
+            <span className="dropzone-hint">
               {file
                 ? `${Math.ceil(file.size / 1024)} KB · ready to encrypt`
                 : "PDF only, up to 20 MB"}
