@@ -56,4 +56,12 @@ services:
       # Redirects lp away from the (absent) host socket to the CUPS container.
       # Takes precedence over /run/cups/cups.sock, so the base compose's mount is
       # left in place and simply unused here.
-      CUPS_SERVER: cups
+      #
+      # ${CUPS_SERVER-cups}, NOT ${CUPS_SERVER:-cups}: PRINT=host in
+      # scripts/demo/up.sh exports CUPS_SERVER="" specifically so this falls
+      # back to the host socket instead of this container. The `-` form only
+      # substitutes when the shell var is *unset*, so an explicitly-exported
+      # empty string is preserved; the `:-` form would treat that empty
+      # string the same as unset and silently reinstate this container as the
+      # target, which is the bug that sent real jobs here in PRINT=host mode.
+      CUPS_SERVER: ${CUPS_SERVER-cups}
