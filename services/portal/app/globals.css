@@ -725,10 +725,26 @@ button.link:hover {
   color: var(--ok);
 }
 
+/* The tile's two lines need real separation: the hint sits directly under a
+   filename that can wrap, so relying on line-height alone crowds them. */
+.dropzone-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
 .dropzone-title {
   font-weight: 600;
   font-size: 0.9375rem;
+  line-height: 1.3;
   word-break: break-word;
+}
+
+.dropzone-hint {
+  color: var(--ink-3);
+  font-size: 0.8125rem;
+  line-height: 1.3;
 }
 
 /* ------------------------------------------------- 6. Cards, steps and hero */
