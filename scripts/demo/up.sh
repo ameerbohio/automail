@@ -33,6 +33,31 @@ ROOT="$(pwd)"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.demo.yml)
 fail() { echo "!! $1" >&2; [ -n "${2:-}" ] && echo "   fix: $2" >&2; exit 1; }
 
+# docker_up: is the daemon reachable? `timeout -k` is load-bearing -- a bare
+# `docker info` against a down daemon blocks, and the CLI ignores SIGINT while
+# blocked, so Ctrl+C appears dead. A live daemon answers in <1s, so 5s is plenty;
+# `-k 2` follows the TERM with a KILL so a signal-ignoring client can't outlast it.
+docker_up() { timeout -k 2 5 docker info >/dev/null 2>&1; }
+
+# ensure_docker: the script runs on the host where Docker lives (a systemd box), so
+# if the daemon is down we just start it -- exactly what you'd type by hand. Opt out
+# with DEMO_NO_DOCKER_START=1. sudo may prompt for a password; that's fine because
+# this is run interactively in your SSH session, and a wrong/empty answer just falls
+# through to the same clear failure below.
+ensure_docker() {
+  docker_up && return 0
+  if [ "${DEMO_NO_DOCKER_START:-}" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+    echo "   Docker daemon down; starting it: sudo systemctl start docker ..." >&2
+    sudo systemctl start docker >/dev/null 2>&1 || true
+    for i in $(seq 1 15); do
+      docker_up && { echo "   daemon up after ${i}s"; return 0; }
+      sleep 1
+    done
+  fi
+  fail "Docker daemon not reachable (and could not be started automatically)" \
+       "start it: sudo systemctl start docker  --  then re-run. \`systemctl status docker\` shows why it won't start."
+}
+
 # PRINT=1 layers the print-enabled override: DEV_MODE off, so the printer makes
 # the REAL `lp` call, against a CUPS server running as a container (see
 # docker-compose.demo-print.yml for why not the host's).
@@ -97,12 +122,7 @@ export TRAEFIK_HTTP_PORT="${TRAEFIK_HTTP_PORT:-8080}"
 export TRAEFIK_HTTPS_PORT="${TRAEFIK_HTTPS_PORT:-8443}"
 
 echo "==> [1/6] Preflight"
-# timeout, not a bare `docker info`: when the daemon is unreachable (here, an SSH
-# tunnel to the Proxmox host that isn't forwarding) the client blocks indefinitely,
-# so preflight hangs instead of reporting the problem. Bound it and fail fast.
-timeout 10 docker info >/dev/null 2>&1 || fail \
-  "no Docker daemon reachable within 10s (daemon down, or the SSH tunnel / DOCKER_HOST to it is not live)" \
-  "start Docker or re-open the tunnel, then re-run. Check: docker context show; echo \$DOCKER_HOST"
+ensure_docker
 [ "${PRINT:-}" = "host" ] && preflight_host_cups && echo "   host CUPS reachable"
 bash scripts/e2e/bootstrap.sh >/dev/null
 if docker volume inspect "$(basename "$ROOT")_pg_data" >/dev/null 2>&1 \
