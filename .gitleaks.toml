@@ -16,4 +16,8 @@ paths = [
   '''services/printer/frames_test\.go''',
   # Dummy opaque-passthrough marker in the proxy unit test (not a credential).
   '''services/portal/lib/proxy\.test\.ts''',
+  # Pinned SHA-256 digests of PUBLIC literals ("automail-token-hash-guard-vector",
+  # the empty string) -- the digest is the test's expected output, and its input
+  # is on the same line. High entropy, zero secrecy.
+  '''services/cloud/handlers/tokens_test\.go''',
 ]
