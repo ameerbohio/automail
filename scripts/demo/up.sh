@@ -97,7 +97,12 @@ export TRAEFIK_HTTP_PORT="${TRAEFIK_HTTP_PORT:-8080}"
 export TRAEFIK_HTTPS_PORT="${TRAEFIK_HTTPS_PORT:-8443}"
 
 echo "==> [1/6] Preflight"
-docker info >/dev/null 2>&1 || fail "no Docker daemon" "start Docker and re-run"
+# timeout, not a bare `docker info`: when the daemon is unreachable (here, an SSH
+# tunnel to the Proxmox host that isn't forwarding) the client blocks indefinitely,
+# so preflight hangs instead of reporting the problem. Bound it and fail fast.
+timeout 10 docker info >/dev/null 2>&1 || fail \
+  "no Docker daemon reachable within 10s (daemon down, or the SSH tunnel / DOCKER_HOST to it is not live)" \
+  "start Docker or re-open the tunnel, then re-run. Check: docker context show; echo \$DOCKER_HOST"
 [ "${PRINT:-}" = "host" ] && preflight_host_cups && echo "   host CUPS reachable"
 bash scripts/e2e/bootstrap.sh >/dev/null
 if docker volume inspect "$(basename "$ROOT")_pg_data" >/dev/null 2>&1 \
