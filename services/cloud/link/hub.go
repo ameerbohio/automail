@@ -10,10 +10,10 @@ import (
 	"automail/cloud/db"
 	"automail/cloud/store"
 
-	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 // Hub owns the printer-link upgrade handler and the read loop for every

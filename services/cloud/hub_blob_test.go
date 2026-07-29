@@ -24,10 +24,10 @@ import (
 	"automail/cloud/store"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 // blobDeleteQueries serves the queries onStatus + deleteDeliveredBlob issue.

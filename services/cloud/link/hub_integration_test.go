@@ -10,9 +10,9 @@ import (
 	"automail/cloud/store"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/redis/go-redis/v9"
 )
 
 // TestHub_RegisterSeedsStateAndDispatchReachesSocket exercises the parts
