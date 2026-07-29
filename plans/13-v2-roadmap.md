@@ -60,6 +60,121 @@ future agent) can pick it up without re-deriving the context:
 
 ---
 
+## Multi-node fleet topology (N cloud nodes × M printer nodes)
+
+- **What.** A deployment framework to run **N cloud-server replicas** (behind one
+  Traefik load balancer, over a shared data tier) and **M printer nodes** (physical
+  Raspberry Pis), in arbitrary combinations, with one-command spin-up. This is the
+  *deployment/orchestration* layer on top of the already-distributed cloud tier —
+  **not new routing code.**
+
+- **Why V2, not V1 — read this first, it corrects a natural misconception.** *The
+  core code already supports N cloud nodes; only the deployment artifacts are
+  single-node.* Dispatch, SSE status fan-out, and presence are all decoupled through
+  **Redis pub/sub**, so any replica can accept a job / hold a browser stream while a
+  *different* replica holds the printer's dial-out socket. What is missing is purely
+  operational: `docker-compose.yml`, the demo scripts, and the Proxmox doc all assume
+  one cloud host. `docker-compose.full.yml` is the sole N-node-aware artifact and it
+  is a **test harness**, not a general deploy.
+  - **Proof it already works (say this in interviews):** `services/cloud/stream_test.go`
+    stands up **two independent hubs** — node A holds the printer socket, node B holds
+    the browser SSE stream — over one shared Redis, and asserts a `delivered` frame
+    from the printer on A reaches the browser on **B**. `docker-compose.full.yml` is a
+    deliberate two-node topology (`cloud-server` = socket owner :8080, `cloud-server-2`
+    = non-owner :8081). Roadmap Phase 5 verify is `--scale cloud-server=2`.
+
+- **Current V1 state.**
+  - Routing: `services/cloud/dispatch/route.go` PUBLISHes to `dispatch:<mailbox_id>`;
+    the node holding the socket SUBSCRIBEs in `services/cloud/link/hub.go`.
+    `receivers == 0` on the publish = printer offline **fleet-wide** → revert/requeue.
+  - The data tier is **single-instance** (one Postgres, one Redis, one MinIO), shared
+    by every replica. That — not the cloud-server tier — is the real scaling frontier;
+    see `plans/15-v3-roadmap.md`.
+
+- **The topology boundary (where each piece is allowed to live — the reminder).**
+  - **Printer nodes can be ANYWHERE with outbound internet.** This falls out of
+    dial-out-through-NAT (`plans/01` field-deployed printers), gated by the mailbox
+    mTLS client cert. A Pi at a friend's house works *today*; the only new piece is
+    exposing the cloud endpoint (a **named** Cloudflare tunnel — the demo already uses
+    a *quick* one — or a WireGuard/Tailscale link) and pointing `CLOUD_SERVER_WS_URL`
+    at it. Deployment, not code.
+  - **Cloud nodes must share a trusted network with the data tier.** The
+    Redis/Postgres/MinIO connections are **not** internet-safe (no mTLS, and Redis
+    pub/sub is load-bearing for *correctness*, assuming low latency). So in V2 the
+    replicas live on the **same LAN** — one or two Proxmox machines is the sweet spot.
+    A genuinely *remote* cloud node crosses into V3.
+
+- **Sketch / considerations.**
+  - **Substrate (recommended for interview weight):** cloud nodes = Proxmox VMs on the
+    LAN (one or two Proxmox hosts); Traefik as the single load-balanced front door;
+    shared single-instance data tier — and *call the data tier out as the V3 HA
+    frontier* (knowing where the limit is scores as much as the scaling). Printer
+    nodes = physical Pis dialing in over mTLS through NAT.
+  - **Orchestration:** start **deploy-only, bash + SSH inventory** (a roles→hosts file;
+    `scripts/fleet/up.sh` that SSHes per role, renders per-role env, brings each node
+    up; matching `down.sh` + a `verify.sh` that reproduces the cross-node assertion on
+    real hardware). Upgrade path: **Docker Swarm** for the cloud tier. Assumes nodes
+    already exist (OS + SSH) — provisioning is out of scope.
+  - **Config matrix to try physically:** `1cloud-1pi` (baseline) · `1cloud-2pi`
+    (dispatch fan-out) · `2cloud-1pi` (the `full.yml` seams on real hosts) ·
+    `2cloud-2pi` · `Ncloud-Mpi` (general). Every config shares the one data tier.
+  - **Concurrency to watch:** every replica runs a dispatcher goroutine PSUBSCRIBEd to
+    the `available` pattern (`services/cloud/dispatch/dispatcher.go`), so multiple nodes
+    can react to the same printer-idle event — the **Postgres job-claim step must stay
+    the atomic guard** against double-dispatch.
+
+- **References.** "Separated field-unit deployment" (above); `services/cloud/dispatch/route.go`,
+  `services/cloud/link/hub.go`, `services/cloud/stream_test.go`; `docker-compose.full.yml`;
+  `docs/testing-plan.md` (cross-node case); `plans/10` Phase 5 verify; `plans/01`
+  field-deployed printers (dial-out boundary); `plans/15-v3-roadmap.md` (data-tier HA).
+
+---
+
+## Field-unit hardware selection (Raspberry Pi)
+
+- **What.** Pin down the embedded device a printer node runs on, and the OS hardening
+  that keeps the plaintext-only-in-RAM invariant true on it.
+
+- **Why V2, not V1.** V1 runs the printer in compose on the dev host; no physical board
+  is involved. Hardware choice only matters once units are separated (see "Separated
+  field-unit deployment").
+
+- **Current V1 state.** The printer is a single `CGO_ENABLED=0` Go binary — it
+  cross-compiles to arm64 for free — but **no arm64 image is built/pinned yet**
+  (`docs/deploy-checklist.md`: the stack is amd64-only). A field unit runs *only* the
+  printer microservice + `cupsd` + a USB printer driver, not the cloud stack, so the
+  hardware bar is low.
+
+- **Sketch / considerations.**
+  - **Primary pick — Raspberry Pi 4 Model B, 2 GB.** USB-A (plug the printer straight
+    in), **gigabit Ethernet** (a metal mailbox cabinet is exactly where WiFi fails),
+    2 GB comfortable for Docker + cupsd + a few-MB plaintext buffer, 64-bit,
+    best-supported board.
+  - **Aggressive-minimal / lowest-power — Pi Zero 2 W, but only running the printer as
+    a bare systemd binary (no Docker).** Dropping Docker removes the arm64 image build
+    and the RAM floor so 512 MB is fine — arguably the more *on-thesis* production form
+    factor given "power dominates at 12M units" (`plans/01`). Caveats: micro-USB OTG
+    (adapter for the printer), WiFi-only, no Ethernet. CM4/CM5 on a carrier board is the
+    productized version.
+  - **Docker vs bare binary is the real fork:** bare → lower RAM, smaller attack
+    surface, direct tmpfs control, no image build; Docker → parity with the compose
+    deployment. Recommendation: a Pi 4 (2 GB) as the Docker workhorse **and** one Zero
+    2 W to prove the bare-binary low-power path.
+  - **Non-negotiable OS hardening on any Pi (else plaintext reaches the SD card):**
+    (1) **disable swap** — Raspberry Pi OS ships `dphys-swapfile` ON (`swapoff` +
+    disable the service), or use zram/encrypted swap; consider `mlock` on the plaintext
+    buffer; (2) **mount `/var/spool/cups` on tmpfs** + `PreserveJobFiles No` — else
+    cupsd's own disk copy leaks plaintext *downstream* of our code; (3) choose a
+    **printer without persistent internal job storage.** These are the same exposures
+    enumerated in "Protecting document content when the print fails" below — this
+    section is the hardware-choice half of that item.
+
+- **References.** "Protecting document content when the print fails" (swap/spool/hardware
+  gaps); `docs/deploy-checklist.md` (amd64-only); `services/printer/print.go` (the
+  `/dev/shm` tmpfs path); `plans/01` (power-dominant scale thesis).
+
+---
+
 ## Swappable dispatch transport: `DISPATCH_MODE = push | poll`
 
 - **What.** Make the printer↔cloud dispatch transport a swappable layer over a
