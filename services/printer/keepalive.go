@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // runKeepalive pings every interval to keep the connection alive and prove
@@ -19,8 +19,8 @@ import (
 // pong -- Ping blocks until the pong arrives or ctx is done) returns, which
 // the caller treats as a dead connection and tears down for reconnect.
 //
-// nhooyr.io/websocket replies to the *peer's* pings automatically; this
-// loop only covers the direction this process initiates.
+// coder/websocket replies to the *peer's* pings automatically; this loop
+// only covers the direction this process initiates.
 func runKeepalive(ctx context.Context, conn *websocket.Conn, interval time.Duration, state *slotState, send func(Frame)) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

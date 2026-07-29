@@ -3,7 +3,7 @@ package link
 import (
 	"testing"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 func TestRegistry_AddAndRemove(t *testing.T) {

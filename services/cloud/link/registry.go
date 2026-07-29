@@ -3,7 +3,7 @@ package link
 import (
 	"sync"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // Registry is the per-node map of mailbox_id -> live socket. It is
