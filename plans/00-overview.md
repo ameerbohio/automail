@@ -37,3 +37,7 @@ This prototype demonstrates the full software stack, with the home printer simul
 ## Target Audience
 
 Canada Post, other postal service companies that struggle having to deal with transactional mail in the world.
+
+## Note
+
+There are practical limitations to this actually making economic sense, for example, Canada Post would still have to deliver advertisement mail among other things that this system can't take care of, so this is more of a hypothetical than a real business solution, hence why it's a passion project and not a startup (lol)
