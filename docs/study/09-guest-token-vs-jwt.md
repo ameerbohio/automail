@@ -5,3 +5,10 @@
 **Why we chose it (the tradeoff/alternative).** The alternative to a guest flow is forcing every sender to create an account before they can mail a single letter — friction this product can't afford if it wants to compete with "buy a stamp and an envelope." A JWT proves *identity* (who is this sender, tied to a permanent account with history); a guest token proves *possession* (whoever holds this specific string gets to check on this specific job, and nothing else — no account, no history, no way to enumerate other jobs). They're deliberately not the same mechanism: a JWT is reusable until it expires and authorizes everything that sender's account can do; a guest token is scoped to exactly one job and has no broader identity behind it at all.
 
 **The honest caveat.** "If the token is lost, the job cannot be tracked — there is no recovery path" (plans/09-api-contracts.md, verbatim). That's a deliberate design choice, not an oversight: there is no account to recover *into* for a guest job, so any recovery mechanism (e.g. "email me my token") would have to either store the sender's email — re-introducing the account-creation friction this flow exists to avoid — or weaken the guarantee that possessing the token is the *only* thing that grants tracking access.
+
+---
+
+## See also
+- [services/cloud/handlers/jobs.go](../../services/cloud/handlers/jobs.go) — dual guest-token/JWT auth on `POST /jobs`
+- [services/cloud/handlers/tokens.go](../../services/cloud/handlers/tokens.go) — `hashToken`, `newOpaqueToken`
+- [services/cloud/db/schema.sql](../../services/cloud/db/schema.sql) — `jobs.guest_token_hash`, `refresh_tokens.token_hash`

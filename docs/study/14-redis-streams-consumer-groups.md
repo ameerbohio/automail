@@ -17,3 +17,12 @@
 **The honest caveat — this is a topology disclosure.** A node name is not a secret, but the header tells an attacker how many nodes exist, how requests are balanced across them, and (with `$HOSTNAME`) something about the naming scheme. Real systems that ship a `Served-By`/`X-Backend` header usually either gate it behind a debug flag or emit an opaque per-boot identifier instead of the hostname. Here it is on unconditionally because the deployment *is* a demo and the demonstrability is the feature — but say the trade-off out loud rather than pretending the header is free. The mitigation is one env check, not a redesign; it is written up in `plans/13-v2-roadmap.md` under "Richer request-path observability".
 
 **What it deliberately does not carry.** Nothing derived from the document. The header is metadata about the *server*, and the zero-knowledge boundary is unaffected — the node it names never held plaintext or the unwrapped key either.
+
+---
+
+## See also
+- [services/cloud/dispatch/route.go](../../services/cloud/dispatch/route.go) — `enqueue`, `TryDispatch`, `Retry`, `attemptDispatch`
+- [services/cloud/dispatch/dispatcher.go](../../services/cloud/dispatch/dispatcher.go) — `EnsureGroup`, `Dispatcher.Run`, `drain`, `claimMinIdle`
+- [services/cloud/main.go](../../services/cloud/main.go) — `NODE_ID` defaulting to hostname
+- [services/cloud/middleware.go](../../services/cloud/middleware.go) — `X-Automail-Node` header
+- [15-select-for-update-nowait.md](15-select-for-update-nowait.md) — the Postgres lock that makes redelivery safe

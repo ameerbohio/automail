@@ -76,13 +76,18 @@ Two things are easy to get wrong:
 
 ## Middleware gates account pages *only*
 
-`middleware.ts` matches just `/history` and `/jobs/*` and redirects to `/login`
-when the refresh cookie is absent. It's a **lightweight UX gate** — presence of
-a cookie, not a validity check — so a guest doesn't see an account page flash
-before the client redirects. Real enforcement is still the cloud API returning
-`401`/`404`, which the pages also handle. Crucially, `/` and `/track` are *not*
-matched, so the guest flow stays fully open — the Phase 8 requirement that
-"guest flow still works unauthenticated."
+`middleware.ts`'s matcher redirects to `/login` when the refresh cookie is
+absent. It's a **lightweight UX gate** — presence of a cookie, not a validity
+check — so a guest doesn't see an account page flash before the client
+redirects. Real enforcement is still the cloud API returning `401`/`404`, which
+the pages also handle. Crucially, `/` and `/track` are *not* matched, so the
+guest flow stays fully open — the Phase 8 requirement that "guest flow still
+works unauthenticated."
+
+**Update (Phase 9):** the matcher now also covers `/admin/:path*` — added when
+the ops dashboard shipped, since admin pages need the same cookie-presence gate
+before the cloud's real `requireAdmin` 403 check runs. See
+[20-ops-dashboard-rbac.md](20-ops-dashboard-rbac.md).
 
 ## Interview soundbite
 
@@ -95,3 +100,11 @@ matched, so the guest flow stays fully open — the Phase 8 requirement that
 > encrypted (blind index is the fix), and both the SSE auth and the cookie path
 > need special handling because `EventSource` can't send headers and the proxy
 > sits on a different path than the cloud server.
+
+---
+
+## See also
+- [services/portal/middleware.ts](../../services/portal/middleware.ts) — cookie-presence gate, matcher list
+- [services/portal/lib/proxy.ts](../../services/portal/lib/proxy.ts) — cookie-path rewrite
+- [services/portal/app/api/jobs/[id]/stream/route.ts](../../services/portal/app/api/jobs/[id]/stream/route.ts), [app/jobs/[id]/page.tsx](../../services/portal/app/jobs/[id]/page.tsx) — `?access=<jwt>` handling
+- [07-pgcrypto-pii-encryption.md](07-pgcrypto-pii-encryption.md) — why `senders.email_enc` can't be a unique index

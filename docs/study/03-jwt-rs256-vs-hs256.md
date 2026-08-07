@@ -5,3 +5,9 @@
 **Why we chose it (the tradeoff/alternative).** HS256 (HMAC-SHA256) is symmetric: the same secret both signs and verifies, so every node that needs to *verify* a token must also hold the secret capable of *forging* one. At N horizontally-scaled cloud-server nodes, that means the signing secret is replicated everywhere — a single leaked node compromises the ability to mint tokens for the whole cluster. RS256 keeps the private (signing) key in one place; every node can hold just the public key and verify-only, with no ability to forge a token even if that node is compromised.
 
 **The honest caveat.** RS256 costs more CPU per verification than HS256 (asymmetric crypto vs a fast HMAC) — at extreme request volumes that's a real, measurable tradeoff against HS256's near-free verification. It's the right call here because the asymmetry of "verify everywhere, sign in one place" matters more than the CPU cost at this scale. Also: RS256 only protects the *signing* key from node compromise — it does nothing if the private key itself leaks (e.g. from the one node holding it), at which point the threat model is identical to HS256's secret leaking.
+
+---
+
+## See also
+- [services/cloud/jwtutil/jwtutil.go](../../services/cloud/jwtutil/jwtutil.go) — `jwt.SigningMethodRS256` usage
+- [infra/certs/gen-jwt-keys.sh](../../infra/certs/gen-jwt-keys.sh) — the JWT signing keypair, separate from the mTLS and printer-document keypairs

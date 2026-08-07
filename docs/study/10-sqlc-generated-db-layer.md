@@ -5,3 +5,10 @@
 **Why we chose it (the tradeoff/alternative).** The alternative is an ORM (e.g. GORM) — write Go structs and method calls, let the library generate SQL underneath. That trades control for convenience: the actual SQL being run is implicit, and recipient search's "decrypt-then-ILIKE" query (`pgp_sym_decrypt(residents.name_enc, ...) ILIKE ...`) is exactly the kind of query an ORM's query builder makes awkward to express. sqlc inverts that: you write real SQL (so anything Postgres can do, you can do, including pgcrypto calls inline) and get compile-time-checked Go for free — a typo in a column name or a param-count mismatch is a `sqlc generate` failure, not a runtime panic. The cost is a build step: every query change requires regenerating before the Go code compiles against it.
 
 **The honest caveat.** sqlc's type inference isn't always right by default — `SearchRecipientsParams` initially generated two separate fields for what should have been one (`$1`/`$2` from the same logical argument used twice in the SQL text) and inferred the search term as nullable, neither of which was correct. Fixing it required `sqlc.arg(name)` to force shared naming and an explicit `::text` cast to force non-null typing (see [services/cloud/db/queries.sql](../../services/cloud/db/queries.sql)) — sqlc reads the SQL's *shape*, not the developer's *intent*, so its first guess at a parameter's type/nullability is a starting point to verify, not a guarantee.
+
+---
+
+## See also
+- [sqlc.yaml](../../sqlc.yaml) — codegen config
+- [services/cloud/db/queries.sql](../../services/cloud/db/queries.sql) / [schema.sql](../../services/cloud/db/schema.sql) — the hand-written input
+- [services/cloud/db/queries.sql.go](../../services/cloud/db/queries.sql.go) / [models.go](../../services/cloud/db/models.go) — generated output, "DO NOT EDIT"

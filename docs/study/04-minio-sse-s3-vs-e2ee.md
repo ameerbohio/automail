@@ -5,3 +5,9 @@
 **Why we chose it (the tradeoff/alternative).** It would be reasonable to assume this is redundant — "it's already encrypted, why encrypt again?" — but the two layers defend different threats with independent keys. Browser-side E2EE (the sender's AES key, which MinIO/the cloud operator never sees) hides document contents even from whoever operates the cloud server. SSE-S3 (MinIO's own key, which MinIO *does* hold) protects the object if the underlying disk or a backup is stolen — an attacker with just the raw disk gets ciphertext-of-ciphertext, useless without MinIO's key. Skipping SSE-S3 and relying on E2EE alone would still be secure against a curious operator, but would leave physical media (disks, snapshots, backups) only as safe as wherever they end up, with no encryption baked in.
 
 **The honest caveat.** SSE-S3 buys little against an attacker who compromises the *running* MinIO process itself — at that point the process holds the KMS key in memory and can decrypt its own at-rest data on demand. Its real value is specifically against offline/at-rest theft (stolen disks, leaked backups), not against an active process-level compromise. That's also why it doesn't weaken the E2EE guarantee: even a fully compromised MinIO process still can't recover the *original* plaintext, because the browser's AES key never touches MinIO at all.
+
+---
+
+## See also
+- [docker-compose.yml](../../docker-compose.yml) — `MINIO_KMS_SECRET_KEY` static single-key KMS config
+- [plans/02-security.md](../../plans/02-security.md) — the browser-side AES-256-GCM layer this sits underneath
