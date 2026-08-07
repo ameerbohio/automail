@@ -42,12 +42,19 @@ history ([[19-sender-accounts-auth]]) and the SSE stream
 
 ### 3. Live status is derived from the cache, not the database row
 
-`mailboxes.status` in Postgres is only ever the `'offline'` default — the
-printer-link hub writes liveness to **Redis** (`mailbox:<id>:state`, 90s TTL),
-not back to the row ([[11-dispatch-fan-in-printer-link]]). So the dashboard's
-"is this printer up?" cannot come from the DB. `AdminMailboxes` reads the DB for
-the *stable* facts (address, configured slots and their capacity) and overlays
-the *live* facts from Redis:
+`mailboxes.status` in Postgres is **not** stuck at the `'offline'` default — the
+printer-link hub's `mirrorLiveness` (`services/cloud/link/hub.go`) calls
+`UpdateMailboxLiveness` on every register/state frame and does write the real
+status string back to the row. What's true is narrower: `AdminMailboxes`
+(`services/cloud/handlers/admin.go`) simply never *reads* that column for its
+response — it derives "is this printer up?" purely from **Redis**
+(`mailbox:<id>:state`, 90s TTL, [[11-dispatch-fan-in-printer-link]]) instead, so
+the dashboard's live badge is cache-derived by choice, not because the DB column
+is unmaintained. (The source comment at `admin.go` around the `AdminMailboxes`
+handler currently repeats the same "column is never updated" claim — that
+comment is stale too and worth fixing alongside this doc.) `AdminMailboxes`
+reads the DB for the *stable* facts (address, configured slots and their
+capacity) and overlays the *live* facts from Redis:
 
 - **present** cache entry → the printer's own reported status (`idle`/`printing`)
   and current per-slot occupancy;
@@ -98,3 +105,12 @@ the frontend fanning out N filtered list calls.
   session cookie; the true admin gate is the cloud 403, which the pages render
   as "not authorized." The browser is never trusted to decide entitlement —
   it only decides what to *show* while the server decides what to *serve*.
+
+---
+
+## See also
+- [services/cloud/handlers/admin.go](../../services/cloud/handlers/admin.go) — `AdminMailboxes`, `AdminListJobs`, `AdminJobStatusCounts`
+- [services/cloud/middleware.go](../../services/cloud/middleware.go) — `requireAdmin`
+- [services/cloud/link/hub.go](../../services/cloud/link/hub.go) — `mirrorLiveness` / `UpdateMailboxLiveness`
+- [services/cloud/db/queries.sql](../../services/cloud/db/queries.sql) — metadata-only admin queries
+- [services/portal/app/admin/layout.tsx](../../services/portal/app/admin/layout.tsx) — cosmetic frontend gate

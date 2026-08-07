@@ -109,3 +109,13 @@ usable token.
 > just encrypted-at-rest. The byte layout and OAEP parameters are pinned to
 > exactly what the Go printer decrypts; the interesting bugs are all
 > contract-drift bugs (IV placement, MGF1 hash, base64 flavor).
+
+---
+
+## See also
+- [services/portal/lib/encrypt.ts](../../services/portal/lib/encrypt.ts) — browser-side encrypt
+- [services/printer/crypto.go](../../services/printer/crypto.go) — printer-side decrypt, the byte-for-byte counterpart
+- [services/portal/lib/proxy.ts](../../services/portal/lib/proxy.ts) — thin same-origin proxy, `CLOUD_API_URL` server-side only
+- [services/portal/app/page.tsx](../../services/portal/app/page.tsx) — direct-to-MinIO PUT
+- [services/portal/app/api/jobs/[id]/stream/route.ts](../../services/portal/app/api/jobs/[id]/stream/route.ts) — guest token in the SSE query string
+- [infra/certs/gen-printer-keys.sh](../../infra/certs/gen-printer-keys.sh) — RSA-4096 printer keypair

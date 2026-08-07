@@ -5,3 +5,10 @@
 **Why we chose it (the tradeoff/alternative).** The naive alternative — browser uploads the blob to the cloud server, cloud server forwards it to MinIO — doubles the bandwidth cost (every byte crosses the network twice) and, worse, puts the cloud server in the data path for something it has no reason to ever see. Since the cloud server is already supposed to be zero-knowledge about document contents, routing the blob *through* it would be actively working against that design even though the server still couldn't decrypt it. A pre-signed URL keeps the cloud server purely in the metadata/coordination role: it issues a time-boxed, scoped credential (this exact object key, this exact HTTP method, this exact expiry) without ever holding a long-lived MinIO credential in the browser.
 
 **The honest caveat.** `POST /jobs/upload-url` happily returns an upload URL for a `recipient_id` whose blob never gets followed up with a `POST /jobs` call — an abandoned/orphaned blob in MinIO with no associated job row. This prototype has no garbage-collection sweep for that case (a real system would need a TTL-based cleanup job for blobs with no matching job within some window). Also, the presigned URL's signature is the *only* gate — anyone who obtains the URL (e.g. via a referrer leak or browser history) can use it until it expires, which is why the expiry window is kept short (15 minutes) rather than convenient-but-risky longer windows.
+
+---
+
+## See also
+- [services/cloud/handlers/jobs.go](../../services/cloud/handlers/jobs.go) — `POST /jobs/upload-url`, 15-minute TTL
+- [services/cloud/minioclient/client.go](../../services/cloud/minioclient/client.go) — `PresignedPutObject`
+- [18-web-crypto-e2ee-portal.md](18-web-crypto-e2ee-portal.md) — the browser side of this upload

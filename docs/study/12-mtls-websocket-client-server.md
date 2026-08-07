@@ -5,3 +5,12 @@
 **Why we chose it (the tradeoff/alternative).** `coder/websocket` over `gorilla/websocket`: it's a smaller API (`Conn.Read`/`Write`/`Ping`/`Close`, all `context.Context`-aware) built directly on `net/http`, so mTLS configuration is just "configure an `http.Client` like you always would" rather than a library-specific dialer with its own TLS plumbing. `gorilla/websocket` is older and more widely deployed, but its `Dialer` duplicates fields `net/http` already has (its own `TLSClientConfig`, `Proxy`, etc.) instead of accepting an `*http.Client`. For a learning-focused prototype, `context.Context` cancellation on every blocking call (read, write, ping) was worth more than gorilla's larger install base — it's what makes the reconnect loop in [wsclient.go](../../services/printer/wsclient.go) cancel cleanly on `SIGTERM` instead of needing manual deadline juggling.
 
 **The honest caveat.** Hostname verification (`ServerName` matching a cert's SAN) is a *separate* check from "was this cert signed by a CA I trust." Go TLS clients (1.15+) refuse to fall back to matching against a cert's `CN` at all — only a `subjectAltName` entry counts. The first version of `gen.sh` only set a `CN` (`cloud-server`) on the cloud-server cert, which would have made the printer's handshake fail the moment it ran against the real TLS stack rather than a mock. `infra/certs/gen.sh` now passes `-extfile <(printf "subjectAltName=DNS:cloud-server,DNS:localhost")` to the signing step, so the cert carries a proper SAN and Compose's hostname-based dial verifies for the right reason instead of by `CN` coincidence.
+
+---
+
+## See also
+- [services/printer/wsclient.go](../../services/printer/wsclient.go) — dial loop, `http.Client` with `tls.Config`
+- [services/printer/mtls.go](../../services/printer/mtls.go) — `newMTLSClientConfig`
+- [services/cloud/main.go](../../services/cloud/main.go) — `startMTLSServer`
+- [services/cloud/handlers/printerlink.go](../../services/cloud/handlers/printerlink.go) — the post-handshake handler
+- [infra/certs/gen.sh](../../infra/certs/gen.sh) — SAN-bearing cert generation

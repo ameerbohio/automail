@@ -6,7 +6,7 @@ Covers `services/portal/app/globals.css`, `app/icons.tsx`, `app/journey.tsx` (se
 
 ## 1. Why no component library
 
-**What it is.** The whole portal UI is one stylesheet of CSS custom properties plus ~25 hand-authored inline SVG components. No Tailwind, no shadcn, no Material, no icon package, no web fonts.
+**What it is.** The whole portal UI is one stylesheet of CSS custom properties plus a set of hand-authored inline SVG components (`app/icons.tsx`; 16 exported components as of this writing). No Tailwind, no shadcn, no Material, no icon package, no web fonts.
 
 **Why we chose it.** Three reasons that are defensible in an interview:
 
@@ -73,3 +73,11 @@ Design decisions worth defending:
 ## 5. The line to hold in an interview
 
 > The portal's UI has no dependencies because the deployment target has no egress and the project's whole claim is about not trusting intermediaries. The tracker animates with composited transforms rather than layout properties, and the same DOM rotates between horizontal and vertical layouts in CSS. Everything is token-driven, so dark mode is a variable reassignment — and every animation is disabled under `prefers-reduced-motion`, which is only safe because progress is also encoded in colour and position.
+
+---
+
+## See also
+- [services/portal/app/globals.css](../../services/portal/app/globals.css) — design tokens, `.journey-rail-fill` transform, responsive tables
+- [services/portal/app/icons.tsx](../../services/portal/app/icons.tsx) — inline SVG components
+- [services/portal/app/journey.tsx](../../services/portal/app/journey.tsx) — the tracker component
+- [services/portal/app/track/page.tsx](../../services/portal/app/track/page.tsx), [app/jobs/[id]/page.tsx](../../services/portal/app/jobs/[id]/page.tsx) — first-sighting timestamp logic (consumed by, not implemented in, `journey.tsx`)

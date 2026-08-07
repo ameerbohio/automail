@@ -28,7 +28,7 @@ Correct: the reason is at-least-once delivery with acknowledgement. Pub/Sub has 
 
 **Q: Why can't we just use AES directly to encrypt the PDF?**
 *Context: asked during discussion of why hybrid RSA+AES was chosen over alternatives.*
-Answer: _(to be filled in)_
+Answer: Key distribution. AES is symmetric — both sides need the same secret key — but the sender and printer have never met, so there's no secure channel to share one before the job arrives. RSA's asymmetric keypair solves this: the sender encrypts to the printer's public key, and only the printer's private key can undo it, no pre-shared secret needed. See [16-hybrid-encryption.md](16-hybrid-encryption.md), "Why not AES alone."
 
 ---
 
@@ -113,7 +113,7 @@ Answer: _(to be filled in)_
 
 **Q: Phase 6 zeroes the key passphrase seconds after startup but leaves the RSA private key sitting in RAM for the whole process lifetime. Isn't the private key the more sensitive secret? Why the asymmetry?**
 *Context: came up implementing Phase 6 memory hygiene. The RSA key is needed to unwrap the AES key on every job, so it must stay resident; the passphrase's only job is the one-time key load, so it can go immediately. Be able to discuss what production would do differently (HSM / locked memory pages / `memguard`) and why zeroing a Go `string` from `os.Getenv` is impossible anyway.*
-Answer: _(to be filled in)_
+Answer: The RSA private key must stay resident because it's needed to decrypt every incoming job for the process's whole lifetime — there's no point in the run where it's safe to discard. The passphrase's job ends the moment the key is loaded, so it's scrubbed immediately: `PRINTER_KEY_PASSPHRASE` is `os.Unsetenv`'d and the `[]byte` copy used for derivation is zeroed. The honest gap: `os.Getenv` first returns a Go `string`, which is immutable and can't be zeroed, so it lingers until GC — production would source the passphrase into locked, mutable memory (`memguard`, OS-locked pages, or an HSM that never exposes the key at all). See [16-hybrid-encryption.md](16-hybrid-encryption.md), "Passphrase hygiene, and its honest limit."
 
 ---
 
@@ -189,3 +189,10 @@ exfiltration resistance. Also worth noting the deeper point: the plan's CSP was
 written before there was a Next.js app to serve, and nothing enforced it in
 between — a spec that was never exercised is a spec that was never true.*
 Answer: _(to be filled in)_
+
+---
+
+## See also
+- [16-hybrid-encryption.md](16-hybrid-encryption.md) — answers the AES/RSA and passphrase-hygiene questions above
+- [.env.example](../../.env.example) — the unwired `REDIS_PASSWORD`
+- [docs/deploy-checklist.md](../deploy-checklist.md) — where the Redis-auth gap is marked explicitly not-wired-up

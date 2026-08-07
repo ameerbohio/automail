@@ -11,3 +11,10 @@ This repo's `docker-compose.demo-print.yml` shipped `CUPS_SERVER: cups` as a bar
 **Why this class of bug is easy to miss.** Nothing errored. `lp` exited 0 (it *did* reach a CUPS server — just not the intended one), the app's own success-path logging is intentionally silent (see `services/printer/print.go` — only the failure and dev-mode branches log), and the fake destination happened to be named identically to the real queue (`Canon_MF240`), so even `lpstat -p Canon_MF240` run inside the printer container looked correct. The only way to catch it was cross-referencing the *host's* CUPS job history against the container's — the two `Canon_MF240` queues live in different processes entirely.
 
 **The honest caveat.** `${VAR-default}` only helps when the override is meant to be a real, distinguishable value like empty-string. If the desired override *is* itself empty and indistinguishable from "not set" for the consumer (e.g., a flag that's either absent or `"1"`), this pattern doesn't disambiguate anything — you'd need a separate presence-check variable. It solved this specific case only because `CUPS_SERVER=""` (fall back to socket) is semantically different from `CUPS_SERVER` unset-and-defaulted (talk to the demo container), and `lp` itself treats an empty `CUPS_SERVER` as "use the default socket," not as an error.
+
+---
+
+## See also
+- [docker-compose.demo-print.yml](../../docker-compose.demo-print.yml) — `CUPS_SERVER: ${CUPS_SERVER-cups}`
+- [scripts/demo/up.sh](../../scripts/demo/up.sh) — `PRINT=host` mode
+- [services/printer/print.go](../../services/printer/print.go) — silent success-path logging

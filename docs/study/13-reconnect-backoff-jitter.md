@@ -5,3 +5,9 @@
 **Why we chose it (the tradeoff/alternative).** Plain exponential backoff (no randomness) is fine for *one* client, but this system has many mailbox units, and the thing most likely to disconnect a printer's socket is a shared event — the cloud server restarting, a network blip on the Docker bridge, a deploy. Without jitter, every printer that dropped at the same moment also reconnects at the same moment (after the same deterministic 1s, 2s, 4s... schedule), so the retry storm just repeats at every backoff tier instead of spreading out. Full jitter (uniformly random in `[0, base)`, not `[base/2, base*1.5)` or similar) is the simplest version that actually decorrelates retries between printers — AWS's backoff literature treats it as the default choice unless you have a specific reason for a narrower jitter window.
 
 **The honest caveat.** This is reconnect backoff for losing the *whole socket* — it says nothing about retrying an individual failed job. Those are different failure domains: a dropped connection means *every* in-flight frame is gone and the printer needs to re-register from scratch (`runClient`'s loop), whereas a single `dispatch` frame failing mid-print (Phase 6, e.g. a CUPS error) is a job-level retry that the cloud server's `retry_count` column and Phase 4's dispatcher are responsible for — conflating the two would either retry a healthy connection unnecessarily or under-retry a real job failure.
+
+---
+
+## See also
+- [services/printer/wsclient.go](../../services/printer/wsclient.go) — `backoffWithJitter`, `runClient`
+- [services/printer/config.go](../../services/printer/config.go) — `RECONNECT_MAX_BACKOFF`

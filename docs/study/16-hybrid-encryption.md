@@ -42,4 +42,14 @@
 
 ## Pending side questions (answer before interview)
 
-- **Why can't we just use AES directly?** (key distribution problem — how do sender and printer share the key without a pre-existing secure channel?)
+- **Why can't we just use AES directly?** Already answered above under "Why not AES alone" — key distribution: sender and printer have no pre-shared secret, and RSA's asymmetric keypair solves that without one.
+
+---
+
+## See also
+- [services/printer/crypto.go](../../services/printer/crypto.go) — RSA-OAEP unwrap, AES-256-GCM decrypt, PBES2/PBKDF2 key loading
+- [services/portal/lib/encrypt.ts](../../services/portal/lib/encrypt.ts) — the browser-side encrypt half (see [18-web-crypto-e2ee-portal.md](18-web-crypto-e2ee-portal.md))
+- [services/printer/print.go](../../services/printer/print.go) — unlink-before-`delivered`, zero-then-GC
+- [services/cloud/link/hub.go](../../services/cloud/link/hub.go) — blob deletion after `delivered`
+- [services/cloud/minioclient/client.go](../../services/cloud/minioclient/client.go) — `RemoveObject`
+- [infra/certs/gen-printer-keys.sh](../../infra/certs/gen-printer-keys.sh) — 4096-bit RSA keygen

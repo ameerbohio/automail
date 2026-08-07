@@ -415,3 +415,13 @@ All of the above runs on one laptop. What it deliberately *doesn't* reproduce:
 production traffic, canary rollouts, error budgets, and on-call feedback into the
 suite. Local chaos tests *simulate* failure; they don't replace having survived it.
 Naming that boundary honestly is part of the strategy.
+
+---
+
+## See also
+- [docs/testing-plan.md](../testing-plan.md) — the executable spec this doc narrates
+- [Makefile](../../Makefile) — all `make` targets referenced above
+- [.github/workflows/ci.yml](../../.github/workflows/ci.yml) — CI gates
+- [e2e/](../../e2e/) — `harness.go`, `fullstack_test.go` (`//go:build e2e`), `chaos_test.go` (`//go:build chaos`), `deploy_smoke_test.go` (`//go:build smoke`)
+- [docs/deploy-checklist.md](../deploy-checklist.md), [docs/release-checklist.md](../release-checklist.md), [docs/runbook.md](../runbook.md)
+- [scripts/load/baseline.json](../../scripts/load/baseline.json) — committed load baseline

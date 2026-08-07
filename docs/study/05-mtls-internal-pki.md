@@ -5,3 +5,11 @@
 **Why we chose it (the tradeoff/alternative).** Regular TLS only proves the *server's* identity to the client (the printer can trust it's really talking to "a TLS server"), not the reverse — anyone could open a connection and present no certificate at all. mTLS makes both sides present a certificate signed by the same trusted CA, so the printer can cryptographically refuse any connection that doesn't present a cert signed by `automail-internal-ca` — meaning no other process on the network, even one that knows the printer's address, can open the dispatch channel. The alternative (a shared bearer token over plain TLS) is weaker: a token can be copied out of a log or a misconfigured request; a private key behind mTLS never leaves the holder's process.
 
 **The honest caveat.** The whole scheme's security rests on the CA's private key (`ca-key.pem`) staying secret — anyone who gets it can mint a cert that impersonates either side. It also doesn't survive cert rotation gracefully in this prototype: re-running `gen.sh` regenerates *everything*, including the CA, so old certs become invalid simultaneously rather than rolling over with an overlap window. Production needs OTA cert delivery with an expiry/rollback plan (see "Certificate rotation" in [plans/01-architecture.md](../../plans/01-architecture.md)) — `docker compose restart` is a dev-only stand-in for that.
+
+**Note:** this CA is scoped to the cloud↔printer mTLS hop only. The browser↔Traefik edge cert is a deliberately separate, never-cross-wired trust domain — see [01-traefik-reverse-proxy.md](01-traefik-reverse-proxy.md).
+
+---
+
+## See also
+- [infra/certs/gen.sh](../../infra/certs/gen.sh) — CA + cloud-server + printer leaf cert generation
+- [plans/01-architecture.md](../../plans/01-architecture.md) — "Certificate rotation" section

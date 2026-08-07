@@ -6,4 +6,12 @@
 
 **How it round-robins.** When two containers share the same `traefik.http.services.<name>.loadbalancer` label, Traefik's Docker provider sees both as backends for one service and load-balances between them — default is round robin. Each container gets its own internal network IP via the Docker bridge (`automail` network in [docker-compose.yml](../../docker-compose.yml)); Traefik forwards to whichever container's IP comes up next in rotation.
 
-**The honest caveat.** Mounting `/var/run/docker.sock` into Traefik gives it the ability to introspect (and in principle, control) every container on the host — a real privilege-escalation surface if Traefik itself were compromised. Production deployments mitigate this with a `docker-socket-proxy` sidecar that exposes a read-only, scoped subset of the Docker API instead of the raw socket. Also: Traefik's self-signed default cert (used here since no real cert is configured yet) means `curl https://api.automail.local/healthz` needs `-k`/`--insecure` until Phase 1 wires up the internal CA from `infra/certs/gen.sh`.
+**The honest caveat.** Mounting `/var/run/docker.sock` into Traefik gives it the ability to introspect (and in principle, control) every container on the host — a real privilege-escalation surface if Traefik itself were compromised. Production deployments mitigate this with a `docker-socket-proxy` sidecar that exposes a read-only, scoped subset of the Docker API instead of the raw socket. Also: `curl https://api.automail.local/healthz` still needs `-k`/`--insecure`, but not because the edge cert is unwired — it now has its own dedicated self-signed cert (`infra/certs/gen-edge-certs.sh`, loaded as `tls.stores.default.defaultCertificate` in [infra/traefik/dynamic.yml](../../infra/traefik/dynamic.yml)), deliberately kept a *separate* trust domain from the internal mTLS CA (`infra/certs/gen.sh`) that secures the cloud↔printer hop. The two are never cross-wired by design, so `-k` is a permanent fact of this deployment (no real edge CA in front), not a "Phase 1" gap waiting to close.
+
+---
+
+## See also
+- [infra/traefik/dynamic.yml](../../infra/traefik/dynamic.yml) — edge TLS store / default certificate
+- [infra/certs/gen-edge-certs.sh](../../infra/certs/gen-edge-certs.sh) — edge cert generation (separate trust domain from mTLS)
+- [infra/certs/gen.sh](../../infra/certs/gen.sh) — the internal mTLS CA, intentionally not the same cert
+- [docker-compose.yml](../../docker-compose.yml) — Traefik service, Docker-provider labels, `automail` network
