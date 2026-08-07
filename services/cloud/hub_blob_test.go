@@ -12,8 +12,6 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -88,12 +86,7 @@ func TestHubDeletesBlobOnDelivered(t *testing.T) {
 		return nil
 	}
 
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := hub.Accept(r.Context(), w, r); err != nil {
-			t.Logf("hub.Accept returned: %v", err)
-		}
-	}))
-	defer node.Close()
+	node := newPrinterLinkNode(t, hub, "node")
 
 	printer, _, err := websocket.Dial(ctx, "ws"+node.URL[len("http"):], nil)
 	if err != nil {
@@ -174,12 +167,7 @@ func TestHubDeliveredWithoutDeleteBlobDoesNotPanic(t *testing.T) {
 	}
 	ch := sub.Channel()
 
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := hub.Accept(r.Context(), w, r); err != nil {
-			t.Logf("hub.Accept returned: %v", err)
-		}
-	}))
-	defer node.Close()
+	node := newPrinterLinkNode(t, hub, "node")
 
 	printer, _, err := websocket.Dial(ctx, "ws"+node.URL[len("http"):], nil)
 	if err != nil {

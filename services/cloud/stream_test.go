@@ -111,6 +111,40 @@ func newStreamNode(t *testing.T, mr *miniredis.Miniredis, jwtPub *rsa.PublicKey,
 	return ts
 }
 
+// newPrinterLinkNode serves one cloud "node" whose only route is the
+// printer's dial-out WebSocket, handled by hub.Accept.
+//
+// hub.Accept upgrades to a WebSocket, which HIJACKS the connection, and
+// httptest.Server.Close does not wait for hijacked conns (it stops tracking
+// them at StateHijacked). The handler goroutine can therefore still be
+// running -- returning from readLoop with the EOF the closed printer socket
+// produced -- after the test function has returned. Calling t.Logf from
+// there races with testing's own teardown of that same *testing.T: a real,
+// intermittent `-race` failure in CI. So the handler only stashes the error,
+// and the test goroutine reports it while the test is still alive. Same
+// pattern, same reason, as link/hub_integration_test.go.
+func newPrinterLinkNode(t *testing.T, hub *link.Hub, label string) *httptest.Server {
+	t.Helper()
+	acceptErr := make(chan error, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := hub.Accept(r.Context(), w, r); err != nil {
+			select {
+			case acceptErr <- err:
+			default: // only the first error is interesting
+			}
+		}
+	}))
+	t.Cleanup(func() {
+		srv.Close()
+		select {
+		case err := <-acceptErr:
+			t.Logf("%s hub.Accept returned: %v", label, err)
+		default:
+		}
+	})
+	return srv
+}
+
 func newJWTKey(t *testing.T) *rsa.PrivateKey {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -373,12 +407,7 @@ func TestStreamJob_CrossNodeStatusFanout(t *testing.T) {
 	defer rdbA.Close()
 	hubA := link.NewHub(rdbA, db.New(sqlA))
 
-	nodeA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := hubA.Accept(r.Context(), w, r); err != nil {
-			t.Logf("node A hub.Accept returned: %v", err)
-		}
-	}))
-	defer nodeA.Close()
+	nodeA := newPrinterLinkNode(t, hubA, "node A")
 
 	printer, _, err := websocket.Dial(ctx, "ws"+nodeA.URL[len("http"):], nil)
 	if err != nil {
