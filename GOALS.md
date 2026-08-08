@@ -22,6 +22,12 @@ rather than here, because its goal bodies carry the evidence and the traps for
 each change and would bury this file. It gates nothing and is gated by nothing;
 run it whenever the tree is clean.
 
+There is a fourth, independent **Kubernetes Track** (Goals K0–K8) at the bottom of
+this file, specified by [plans/16-kubernetes.md](plans/16-kubernetes.md): moving the
+stateless tier (cloud-server, portal) onto a multi-node k3d cluster with an HPA. It
+also gates nothing — the printer stays outside the cluster, so the CUPS
+`blocked-on-owner` goal does not block it.
+
 ## Process Rules (apply to every goal)
 
 1. **Source of truth**: `plans/` is the specification. Read the relevant plan
@@ -510,6 +516,399 @@ locally (physical print excepted), including a successful HTTPS handshake throug
 Traefik on both routed hostnames; `docs/deploy-checklist.md` lists every host
 prerequisite and secret (incl. the edge-TLS cert) so the first Proxmox deploy has
 no surprises. One commit.
+
+---
+
+# Kubernetes Track — Orchestrating the Stateless Tier
+
+A fourth independent track (Goals K0–K8). It moves **cloud-server and portal** off
+Docker Compose and onto a multi-node local Kubernetes cluster (k3d), load-balanced
+by the cluster's built-in Traefik, autoscaled by an HPA under the existing k6 load.
+The full specification is [plans/16-kubernetes.md](plans/16-kubernetes.md) — read
+the section a goal names, not the whole doc.
+
+It gates nothing and is gated by nothing (in particular **not** by the CUPS
+`blocked-on-owner` Goal 6 — the printer stays outside the cluster in `DEV_MODE`
+throughout, and the physical-print path is unchanged).
+
+Run it with its own recurring prompt:
+
+> Read GOALS.md. In the **Kubernetes Track**, find the first goal (K0, K1, …) whose
+> Status is `pending`. Read the sections of `plans/16-kubernetes.md` that goal
+> names. Implement it, verify its Acceptance, mark it `done`, append a Status Log
+> entry, then **stop** — one goal per run.
+
+## Kubernetes Track Process Rules (apply to every K-goal)
+
+1. **One goal per run, fresh context.** Same rule as the Testing Track, same reason.
+2. **`plans/16-kubernetes.md` is the spec.** The goal bodies here are pointers.
+3. **The Compose path must keep working.** `docker-compose.yml`, `make deploy-smoke`,
+   `make test-e2e-full` and the demo scripts stay green throughout — Kubernetes is an
+   *additional* deployment target, not a replacement. Any K-goal that breaks a
+   Compose target has failed, whatever else it achieved.
+4. **Security invariants are unchanged and non-negotiable** (phase-track Process
+   Rules §3). Two carry extra weight here: mTLS on every internal hop survives the
+   move to Services and NodePorts, and **no PEM, password or key ever enters a
+   committed manifest** — Secrets are created imperatively from `infra/certs/` and
+   `.env` by a Make target. `make scan` (gitleaks) stays the gate.
+5. **Honesty about the substrate.** Four k3d nodes are four containers on one host.
+   Every claim recorded in the Status Log says what was actually exercised. See
+   `plans/16-kubernetes.md` §8 — the limits are a deliverable, not an embarrassment.
+6. **Each goal ends in one commit** (clean subject + body, no AI co-author trailer)
+   and a Status Log row.
+7. **Land the spec first.** `plans/16-kubernetes.md` and this track section are
+   currently untracked/uncommitted. Commit them before or with K0 so the track has
+   a specification in history, per the project's "plans are the source of truth" rule.
+
+## Track prerequisites (verify before starting K0)
+
+Measured on this host 2026-08-07 and written up in `plans/16-kubernetes.md` §2.1.
+Three of these are **owner actions** the agent must not attempt silently:
+
+| Prerequisite | State today | Owner action? |
+|---|---|---|
+| Docker Engine | 29.6.1, working | no |
+| `k3d`, `kubectl` | **both absent** | K1 installs them (pinned) |
+| cgroup v2 | **cgroup v1** (`/sys/fs/cgroup` is `tmpfs`) — k3s's kubelet may not register a node | **yes** — `/etc/wsl.conf` + `wsl --shutdown` |
+| host ports 80/443 | **held by Windows** — forces a non-default edge port, which cascades into CSP / CORS / MinIO presign (§8.1) | **yes**, if the browser flow is to run on 443 |
+| `/etc/hosts` entries for the three `*.automail.local` names | **absent** — every existing suite uses `curl --resolve` or bypasses Traefik | **yes** (sudo), needed for K4's browser acceptance |
+| Memory budget | 15 GiB total, ~10 GiB free — 4 k3s nodes + data tier + app pods is tight | no, but it bounds K3 requests and K7's `maxReplicas: 8` |
+
+K1 is the goal that proves the substrate. If a cluster cannot reach `Ready` here,
+K1 records exactly why and stops as `blocked-on-owner` — it does not work around it.
+
+---
+
+## Goal K0 — Shutdown correctness (blocking prerequisite)
+
+**Status:** pending
+
+Spec: `plans/16-kubernetes.md` §4. **No manifests in this goal** — this is Go work in
+`services/cloud`, and it is a real bug fix that Compose's forgiving lifecycle hid.
+
+`main.go` ends in `server.ListenAndServe()` + `log.Fatal` with no signal handling, so
+SIGTERM kills in-flight requests, open SSE streams and any printer socket the process
+owns. Add `signal.NotifyContext(SIGINT, SIGTERM)` → bounded `server.Shutdown`, cancel
+the dispatcher loop from the same context (`services/printer/main.go:25` is the
+in-repo pattern to follow). Then add `XGROUP DELCONSUMER jobs:pending dispatchers
+<nodeID>` on graceful stop, plus a reaper for consumers idle past a threshold to cover
+OOMKill/node loss. Split the probes: keep the dependency-checking `/healthz` as
+readiness, add a process-only liveness endpoint (§4.4 explains why a dependency check
+is the *wrong* liveness probe). Study doc for the graceful-drain + consumer-lifecycle
+concepts.
+
+**Measured motivation (2026-08-06, before this track existed):** `XINFO GROUPS
+jobs:pending` reported **4 consumers for 3 live nodes** — one leaked by a previous
+container.
+
+**Prerequisites / traps** (all verified in the tree; §4.1–§4.4 has the detail):
+- `server.Shutdown` does **not** cancel in-flight request contexts. `StreamJob`
+  (`services/cloud/handlers/jobs.go:294`) waits on `r.Context().Done()`, which fires on
+  connection close, not shutdown — so every open SSE stream pins the drain for the full
+  timeout and is severed anyway. Needs an explicit drain signal the handler also selects on.
+- There are **two** `http.Server`s. `startMTLSServer` (`services/cloud/main.go:93`) runs in
+  a goroutine, returns only an `error`, and exposes no shutdown handle.
+- The printer link is a **hijacked** connection: `Shutdown` neither waits for nor closes it.
+  `link.Hub` needs a `Close()` that sends `StatusGoingAway`, or the printer waits out a TCP
+  timeout before reconnecting.
+- **`XGROUP DELCONSUMER` discards the consumer's PEL** — it does not hand entries back for
+  `XAUTOCLAIM`. So "ACKed *or left for reclaim*" loses jobs: check `XPENDING` first and skip
+  the delete when non-empty. Same rule for the reaper, whose idle threshold must be stated
+  relative to the existing `XAUTOCLAIM` `MinIdle`.
+- Call the liveness endpoint `/livez`, public mux only, off the guest rate-limit router.
+- Coverage floors ratchet (`scripts/coverage.floors`) and this adds untested `main.go` code —
+  budget real tests, since Process Rule 5 needs the acceptance to be more than a manual look.
+
+**Acceptance:** SIGTERM to a running cloud-server drains in-flight requests instead of
+severing them (including closing open SSE streams deliberately rather than on timeout),
+and the consumer count in `dispatchers` equals the number of live nodes after a
+`--scale 3` up/down/up cycle (it does not today) — cycled with `docker compose stop`
+(SIGTERM), never `kill -9`, or it proves nothing. `make ci` green; `make deploy-smoke`
+and `make test-e2e-full` still pass (this is the only K-goal that changes Go code, so it
+is the one that must re-prove the Compose path). One commit.
+
+---
+
+## Goal K1 — Cluster + image supply
+
+**Status:** pending
+
+Spec: `plans/16-kubernetes.md` §2. Add `infra/k8s/k3d-cluster.yaml` (1 server +
+3 agents, so anti-affinity and drain are real), and `make k8s-up` / `k8s-down` /
+`k8s-images` targets that create the cluster, `docker build` both service images and
+`k3d image import` them — no registry. Document the tooling prerequisites (k3d,
+kubectl) alongside the existing host prerequisites.
+
+**Prerequisites / traps** (§2.1):
+- **k3d and kubectl are not installed.** Install them at pinned versions, and pin the k3s
+  image tag in `k3d-cluster.yaml` too — K4 depends on which Traefik version k3s bundles.
+- **cgroup v1** on this WSL2 kernel is the blocking risk. Verify nodes actually reach
+  `Ready`; if they do not, record it and stop as `blocked-on-owner` (the fix is
+  `/etc/wsl.conf` + `wsl --shutdown`, an owner action) rather than working around it.
+- **Declare every host port mapping now.** Ports are fixed at cluster-creation time:
+  the ingress ports K4 needs *and* the mTLS NodePort K5 dials. Retrofitting means
+  destroying and recreating the cluster.
+- **Compose declares no `image:` keys.** Define explicit tags (`automail/cloud-server:dev`,
+  `automail/portal:dev`) with `imagePullPolicy: IfNotPresent`, and **never `:latest`** —
+  Kubernetes forces `Always` on it and a registry-less k3d answers with `ImagePullBackOff`.
+  `k3d image import` keys on image ID, so a rebuild under the same tag needs a re-import
+  **plus** `kubectl rollout restart`.
+- Add a Docker-free `make k8s-validate` (`kubectl --dry-run=client -k`) so the manifests
+  are checkable inside `make ci` on a machine with no cluster.
+
+**Acceptance:** `make k8s-up` yields 4 `Ready` nodes; `make k8s-images` puts both
+images in the cluster (`crictl images` or a test pod pulling `IfNotPresent`);
+`make k8s-down` leaves no containers, networks or volumes behind (`docker ps -a`,
+`docker network ls`, `docker volume ls` all clean of `k3d-*`). One commit.
+
+---
+
+## Goal K2 — Secrets, config, and the data tier
+
+**Status:** pending
+
+Spec: `plans/16-kubernetes.md` §3, §5 (Secrets + Postgres schema paragraphs).
+Postgres, Redis and MinIO as StatefulSets (1 replica each) with headless Services and
+PVCs; `services/cloud/db/schema.sql` mounted as a ConfigMap into
+`/docker-entrypoint-initdb.d/` to preserve the exact first-init behaviour. A
+`make k8s-secrets` target builds the mTLS/JWT Secret from `infra/certs/` and the
+credential Secret from `.env`, both imperatively.
+
+**Prerequisites / traps** (§2.1, §5):
+- **`local-path` is the default StorageClass**: node-local, `WaitForFirstConsumer`. The
+  "delete the pod, data survives" acceptance passes only because the bound PV pins the pod
+  back to the same node — and the corollary is that draining that node leaves it `Pending`
+  forever, which is exactly what K6 wants to do. Pin the data tier to the k3d **server**
+  node with a `nodeSelector` here, so K6 drains an agent.
+- **Keep the pinned images.** MinIO must stay the `-cpuv1` tag (the default image dies with
+  `Fatal glibc error: CPU does not support x86-64-v2` on the Proxmox CPU, and cloud-server
+  depends on it). Postgres 16-alpine, Redis 7-alpine likewise.
+- `/docker-entrypoint-initdb.d/` runs **only on first init of an empty PGDATA**, same as
+  Compose — editing the ConfigMap does nothing to an existing PVC. Guard the wipe the way
+  `scripts/deploy/smoke.sh` does (`ALLOW_DESTRUCTIVE=1`).
+- `make k8s-secrets` sources `.env`, which is gitignored and absent on a fresh clone. Fail
+  loudly pointing at `.env.example` + `infra/certs/*.sh`, don't half-create the Secret.
+- **Two trust domains, two Secrets**: internal mTLS + JWT keys → cloud-server Secret; the
+  edge cert (`infra/traefik/edge-*.pem`) → a `kubernetes.io/tls` Secret for K4's ingress.
+  Merging them undoes the separation c8716b1 created deliberately.
+- `REDIS_PASSWORD` stays **not wired up** — carry the T12 state, don't silently fix it.
+
+**Acceptance:** all three StatefulSets `Ready` with bound PVCs; `kubectl exec` into
+Postgres shows the schema tables; deleting the Postgres pod and letting it reschedule
+preserves the data (and the run records *which node* it came back on, since that is the
+`local-path` property being relied on); `make scan` clean, `.gitleaks.toml` not widened
+to exempt `infra/k8s/`, and `git status` shows no PEM or credential in any manifest.
+One commit.
+
+---
+
+## Goal K3 — cloud-server Deployment
+
+**Status:** pending
+
+Spec: `plans/16-kubernetes.md` §3, §5. Deployment at `replicas: 3` with:
+`NODE_ID` from the downward API (`fieldRef: metadata.name`), readiness on `/healthz`
+and liveness on the K0 process-only probe, resource requests **and** limits (required
+before the HPA in K7 means anything), `maxUnavailable: 0`, `terminationGracePeriodSeconds`
++ `preStop` sleep for the Endpoints race, preferred pod anti-affinity by hostname, and
+a PDB of `minAvailable: 2`. Two Services: ClusterIP on 8080, NodePort on the mTLS 8443.
+
+**Prerequisites / traps** (§4.3, §5):
+- **K0 is load-bearing, not merely prior.** Once `NODE_ID` is the pod name, the Redis
+  consumer name changes on every rollout — without K0's DELCONSUMER this Deployment leaks
+  three consumers per `rollout restart` from the first day it exists.
+- **Size the CPU request against K7 now.** HPA utilization is a percentage *of the request*,
+  and `maxReplicas: 8` × request must still fit the ~10 GiB / 24-core budget or the K7 demo
+  ends in `Pending` pods. Getting this wrong is only discovered two goals later.
+- `terminationGracePeriodSeconds` **must exceed** preStop sleep + K0's `Shutdown` timeout,
+  or the kubelet SIGKILLs mid-drain and the whole design is theatre. Write the arithmetic
+  into the manifest comment. (`alpine:3.19` base, so an `exec` `sleep` preStop works.)
+- Liveness on `/livez` **only** — putting the dependency-checking `/healthz` on liveness
+  turns a Redis blip into a simultaneous restart of every cloud pod (§4.4).
+- NodePorts live in 30000–32767, so the K5 printer URL is `wss://localhost:3XXXX` — which
+  the cert's `DNS:localhost` SAN covers, and nothing else does. See K5.
+
+**Acceptance:** 3 pods `Running` on ≥2 distinct nodes; repeated in-cluster requests
+return ≥2 distinct `X-Automail-Node` values matching pod names; the `dispatchers`
+consumer count equals the pod count **and still does after a `kubectl rollout restart`**
+(the K0 regression guard); the restart completes with `maxUnavailable: 0` honoured.
+One commit.
+
+---
+
+## Goal K4 — portal Deployment + ingress
+
+**Status:** pending
+
+Spec: `plans/16-kubernetes.md` §3. Portal Deployment at `replicas: 2` (ClusterIP
+Service, `CLOUD_API_URL` pointing at the cloud Service). Translate the Compose Traefik
+labels to `IngressRoute` + `Middleware` CRDs — including `secure-headers` and the
+`portal-guest` rate limit, whose placement on the portal origin (not `api.`) was a
+T12 finding and must survive the port; TLS from the existing edge cert as a Secret.
+All three hostnames: `automail.local`, `api.automail.local`, `blob.automail.local`.
+
+**Prerequisites / traps** (§4.4, §8.1) — this is the goal with the most hidden setup:
+- **Browser access needs two owner actions**: `/etc/hosts` entries for the three names
+  (none exist — every current suite uses `curl --resolve` or bypasses Traefik), and a
+  decision about ports. Windows holds 80/443 here, and on a non-default port **four**
+  committed values break together with no server-side error: the CSP `connect-src
+  https://blob.automail.local` (a CSP host-source means the scheme's *default* port),
+  `MINIO_CORS_ORIGIN`, the `MINIO_PUBLIC_ENDPOINT` the presign signs, and the hosts entries.
+  Choose up front: free 80/443, or parameterise all four in the k3d overlay.
+- **The portal has no health endpoint** and no `HEALTHCHECK`. `maxUnavailable: 0` without a
+  readiness probe still drops requests, since a pod is Ready before Next.js is listening.
+  Either add a trivial `app/api/healthz` route (a code change — flag it, this is otherwise a
+  manifest-only goal) or probe `GET /` and accept an SSR render per probe.
+- **Check which Traefik k3s bundles** before writing CRDs — v3 is `traefik.io/v1alpha1`,
+  v2 is `traefik.containo.us/v1alpha1`. Compose pins `traefik:v3.6`; k3s's version comes
+  from the k3s image tag K1 pinned. Do not route the mTLS 8443 through Traefik — that is
+  the K3 NodePort's job.
+- **Port `sniStrict: true` as a `TLSOption` CRD.** It is the regression guard for c8716b1;
+  losing it in the port re-enables the `ERR_SSL_UNRECOGNIZED_NAME_ALERT` first-deploy bug.
+- **`burst` must match `average`** on the rate limit (Traefik defaults burst to 1, turning
+  "20/min" into one request per 3 s, and one guest submission is four back-to-back calls).
+
+**Acceptance:** the full guest flow works in a browser through the ingress on all
+three hostnames; the guest rate limit still throttles (same assertion as
+`make deploy-smoke`) **and the run records what it keys on** — behind the k3d
+loadbalancer, source IPs may collapse to the LB's address, turning a per-IP limit into a
+global one, so a passing throttle is not by itself proof the T12 property survived; no CSP
+violations in the console. One commit.
+
+---
+
+## Goal K5 — Printer dial-in from outside the cluster
+
+**Status:** pending
+
+Spec: `plans/16-kubernetes.md` §6 — read this before assuming the printer is a
+workload; it is not, and `--scale printer=2` double-prints, which is why.
+
+The printer stays a container on the host (`DEV_MODE=true`), pointing
+`CLOUD_SERVER_WS_URL` at the cloud-server NodePort. Add `make k8s-e2e`: seed a mailbox
++ slot, submit a job, assert `delivered`.
+
+**Prerequisites / traps** (§6.1, §6.2) — three of these block the goal outright:
+- **Certificate SANs.** `infra/certs/gen.sh` issues the cloud-server cert with
+  `DNS:cloud-server, DNS:localhost` only, and `services/printer/mtls.go` sets no
+  `ServerName`, so the verified name is whatever host `CLOUD_SERVER_WS_URL` carries.
+  `host.docker.internal`, a node IP, or the k3d serverlb name all fail verification. Pick
+  one: **(a)** dial `wss://localhost:<nodePort>` (SAN already covers it), or **(b)** add
+  SANs to `gen.sh` and regenerate the internal PKI — which invalidates every Compose
+  consumer's certs and forces a `make deploy-smoke` re-run to prove Compose still works.
+- **A container's `localhost` is not the host's.** Option (a) additionally needs
+  `network_mode: host` on the printer, or a bare host process.
+- **A printer-only Compose override is required**: the base printer has
+  `depends_on: cloud-server`, so `docker compose up printer` drags the whole Compose stack
+  up alongside the cluster.
+- **`scripts/e2e/seed.sh` execs `psql` via `docker compose exec postgres`** — it is
+  parameterised only over *which Compose files*. `make k8s-e2e` needs a `kubectl exec`
+  backend for it, reading the same `.env` values that populate the K2 Secret.
+
+**Acceptance:** a job submitted through the ingress reaches `delivered` with the
+printer outside the cluster; `/dev/shm` is empty afterwards (checked with `docker exec`,
+since the printer is not a pod); **and the fan-in is proved** — a job submitted to a pod
+that is *not* the socket owner still dispatches. Note the Compose suite proves this with
+named replicas on distinct host ports precisely because a Service cannot be addressed
+per-pod, so state the method: either `kubectl port-forward` to a specific pod after
+identifying the owner from its logs, or submit through the Service and retry on
+`X-Automail-Node` until it differs from the owner. One commit.
+
+---
+
+## Goal K6 — Failure and rollout behaviour
+
+**Status:** pending
+
+Spec: `plans/16-kubernetes.md` §5, §8. Exercise what Compose cannot: `kubectl delete
+pod` on the socket owner (printer reconnects to a surviving pod, no job lost — the
+Streams PEL + `XAUTOCLAIM` path); `kubectl drain` a node against the PDB; a rolling
+update under continuous traffic asserting **zero non-2xx**. Record what each one
+actually proved, and what it did not (one host, one kernel).
+
+**Prerequisites / traps:**
+- **Drain an agent, never the server node.** The data tier's `local-path` PVs carry a
+  nodeAffinity to the node they bound on (K2 pins them to the server for this reason); drain
+  that node and Postgres sits `Pending` forever and the stack dies. `kubectl drain` also
+  needs `--ignore-daemonsets` (and `--delete-emptydir-data`) to proceed at all.
+- **The zero-non-2xx traffic must dodge the guest rate limit**, or 429s will read as dropped
+  requests. Drive `/healthz` on `api.automail.local` (catch-all router, not the guest one),
+  or raise the limit for the duration and say so.
+- **This is where K6 beats T9, and it should be said so explicitly.** T9 recorded an honest
+  boundary: the Compose printer dials a fixed alias, so the socket cannot fail *over* — the
+  survivor only buffers, and reclaim was cited from the T5 Redis integration test rather
+  than demonstrated. Behind a NodePort Service the printer's reconnect lands on *any*
+  surviving pod, so the reclaim path is exercised for real. That is the claim to make.
+- PDB `minAvailable: 2` against `replicas: 3` allows one eviction; if the K7 HPA has scaled
+  down to 2, a drain correctly **blocks**. Record that if it happens — it is the point of
+  the PDB, not a failure.
+
+**Acceptance:** all three scenarios run with output recorded into a tracked
+`infra/k8s/RESULTS.md` (K8 has to trace its numbers to something committed); the rolling
+update shows zero dropped requests; a job in flight when its owner pod dies still reaches
+`delivered`. One commit.
+
+---
+
+## Goal K7 — HPA under k6 load
+
+**Status:** pending
+
+Spec: `plans/16-kubernetes.md` §7. metrics-server; HPA on cloud-server (min 2, max 8,
+60 % CPU); drive it with the **existing** `scripts/load/submission.js` so the numbers
+are comparable to `scripts/load/baseline.json`. Record pod count over time, p95 at
+each replica count, and the scale-down after load stops.
+
+**Prerequisites / traps** (§7.1):
+- **k6 is not installed on this host** — every existing run uses the pinned k6 *container*
+  on the Compose network. The cluster equivalent is a k6 Job in-cluster, not a host-side run
+  through the ingress (which would add TLS, Traefik and the rate limit to the measured path).
+- **`docker-compose.load.yml` sets `MINIO_PUBLIC_ENDPOINT: ""`** so presigned URLs stay
+  internal; the k8s run needs the same override (a Kustomize `load` patch) or every
+  submission fails at the PUT against an unresolvable `blob.automail.local`.
+- **The committed baseline is not an apples-to-apples gate.** `scripts/load/baseline.json`
+  was measured on a *single* replica with *no CPU limit*. Record a fresh single-replica
+  reference on the cluster and report the HPA run against that; keep the Compose baseline as
+  context, not pass/fail.
+- **metrics-server must be healthy, not merely present** (k3d sometimes needs
+  `--kubelet-insecure-tls`), and the HPA needs ~15–30 s of metrics before it reacts — a
+  short k6 stage shows nothing.
+- **Scale-down defaults to a 300 s stabilization window.** Budget the run to observe it or
+  set `behavior.scaleDown.stabilizationWindowSeconds` explicitly, and say which.
+- If `maxReplicas: 8` × the K3 CPU request does not fit the host, the run ends in `Pending`
+  pods. Recheck the arithmetic here before running, not after.
+
+**Acceptance:** the HPA observably scales up under k6 and back down after, with the run
+recorded into `infra/k8s/RESULTS.md`; p95 stays within a stated bound of the cluster
+single-replica reference, with the topology difference from the Compose baseline stated
+rather than glossed. Every number labelled as a WSL2 dev-host measurement. One commit.
+
+---
+
+## Goal K8 — Study doc + resume bullets
+
+**Status:** pending
+
+Spec: `plans/16-kubernetes.md` §8, §10. A `docs/study/` explainer covering the
+Deployment/StatefulSet distinction, readiness-vs-liveness, the rolling-update
+termination sequence, and HPA mechanics. Add a resume-cheatsheet section with the
+bullets, the defending files, the 30-second answer, and the follow-ups — **including
+the "so Kubernetes made it scale?" trap and its answer** (§10). Fold the §8 limits in
+as things to volunteer, not concede.
+
+**Prerequisites:**
+- Study doc number: `docs/study/` already carries a duplicated `17-` prefix, so the next
+  free number is **24** (`docs/study/24-kubernetes-orchestration.md`).
+- `notes/resume-cheatsheet.md` runs §1–§8 plus Appendix A (off-resume) and Appendix B
+  (retired claims). The new section is **§9**; anything K6/K7 measured but could not support
+  belongs in Appendix B rather than being quietly dropped.
+- Every number must come from `infra/k8s/RESULTS.md` (written by K6 and K7), not from
+  memory of the runs.
+- Add the k8s deployment path as a pointer in `docs/deploy-checklist.md` /
+  `docs/release-checklist.md` so the Compose-first docs don't silently go stale.
+
+**Acceptance:** the cheat-sheet section follows the existing format and every number
+in it is traceable to a line in `infra/k8s/RESULTS.md`. One commit.
 
 ---
 
