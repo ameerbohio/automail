@@ -1,11 +1,13 @@
-//go:build e2e || chaos || smoke
+//go:build e2e || chaos || smoke || shutdown
 
 // Shared harness for the full-system E2E (Goal T8, build tag `e2e`), the
-// resilience/chaos suite (Goal T9, build tag `chaos`) and the deployment-parity
-// smoke (Goal T12, build tag `smoke`). All three drive the product's real HTTP
+// resilience/chaos suite (Goal T9, build tag `chaos`), the deployment-parity
+// smoke (Goal T12, build tag `smoke`) and the graceful-shutdown check (Goal K0,
+// build tag `shutdown`). All of them drive the product's real HTTP
 // contract and the browser's exact crypto wire format -- with nothing but the Go
 // standard library -- against a live compose stack that
-// scripts/e2e/{full,chaos}.sh and scripts/deploy/smoke.sh bring up. Keeping the
+// scripts/e2e/{full,chaos}.sh, scripts/deploy/smoke.sh and
+// scripts/shutdown/check.sh bring up. Keeping the
 // primitives here (encrypt, submit, stream, docker control, /dev/shm inspection)
 // lets the suites stay DRY without any of them importing the cloud/printer
 // modules.

@@ -219,3 +219,150 @@ func TestIntegration_PubSubCrossConnection(t *testing.T) {
 		}
 	})
 }
+
+// TestIntegration_ReapsStaleConsumers pins the consumer-group lifecycle
+// against real Redis (plans/16-kubernetes.md §4.2). It has to run here rather
+// than as a unit test because miniredis does not track a consumer's last-seen
+// time: it reports XINFO CONSUMERS `idle: -1` for every consumer, so the idle
+// threshold the reaper is built around is meaningless against the fake.
+//
+// Three properties, one run, since they are only safe together:
+//   - a consumer idle past the threshold with an empty PEL is deleted (the
+//     OOMKill / lost-node case that graceful DELCONSUMER can never cover);
+//   - a consumer idle past the threshold that still owns un-ACK'd entries is
+//     KEPT -- XGROUP DELCONSUMER discards a PEL instead of handing it back, so
+//     reaping it would destroy a job XAUTOCLAIM was about to reclaim;
+//   - the reaping node never deletes its own consumer.
+func TestIntegration_ReapsStaleConsumers(t *testing.T) {
+	rdb := startRedis(t)
+	ctx := context.Background()
+
+	// ReapIdle shortens the real 5-minute threshold; everything else is the
+	// production path.
+	di := &dispatch.Dispatcher{
+		Deps:     dispatch.Deps{Redis: rdb},
+		NodeID:   "node-live",
+		ReapIdle: 300 * time.Millisecond,
+	}
+	if err := di.EnsureGroup(ctx); err != nil {
+		t.Fatalf("EnsureGroup: %v", err)
+	}
+
+	// One entry per consumer, so each of them exists in the group.
+	read := func(consumer string) string {
+		t.Helper()
+		id, err := rdb.XAdd(ctx, &redis.XAddArgs{Stream: dispatch.PendingStream, Values: newStreamMessage()}).Result()
+		if err != nil {
+			t.Fatalf("XAdd: %v", err)
+		}
+		if _, err := rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
+			Group:    dispatch.ConsumerGroup,
+			Consumer: consumer,
+			Streams:  []string{dispatch.PendingStream, ">"},
+			Count:    10,
+			Block:    -1,
+		}).Result(); err != nil {
+			t.Fatalf("%s XReadGroup: %v", consumer, err)
+		}
+		return id
+	}
+
+	drainedID := read("node-drained") // dead, owes nothing
+	read("node-holding")              // dead, still owes an entry
+	liveID := read("node-live")       // this node
+
+	for _, id := range []string{drainedID, liveID} {
+		if err := rdb.XAck(ctx, dispatch.PendingStream, dispatch.ConsumerGroup, id).Err(); err != nil {
+			t.Fatalf("XAck %s: %v", id, err)
+		}
+	}
+
+	// Let every consumer's idle clock pass ReapIdle. node-live's does too --
+	// the self-skip must not depend on it looking busy.
+	time.Sleep(500 * time.Millisecond)
+
+	di.ReapStaleConsumers(ctx)
+
+	infos, err := rdb.XInfoConsumers(ctx, dispatch.PendingStream, dispatch.ConsumerGroup).Result()
+	if err != nil {
+		t.Fatalf("XInfoConsumers: %v", err)
+	}
+	left := map[string]bool{}
+	for _, i := range infos {
+		left[i.Name] = true
+	}
+	if left["node-drained"] {
+		t.Error("node-drained was idle past the threshold with an empty PEL; it should have been reaped")
+	}
+	if !left["node-holding"] {
+		t.Error("node-holding still owns an un-ACKed entry; reaping it would discard that job (DELCONSUMER drops the PEL)")
+	}
+	if !left["node-live"] {
+		t.Error("the reaper deleted its own consumer")
+	}
+
+	// The kept consumer's entry must still be pending -- i.e. still
+	// reclaimable by XAUTOCLAIM, which is the whole reason it was spared.
+	pending, err := rdb.XPending(ctx, dispatch.PendingStream, dispatch.ConsumerGroup).Result()
+	if err != nil {
+		t.Fatalf("XPending: %v", err)
+	}
+	if pending.Count != 1 {
+		t.Fatalf("pending entries after reap = %d, want 1 (node-holding's job survives)", pending.Count)
+	}
+}
+
+// TestIntegration_RemoveConsumerOnShutdown is the graceful half of the same
+// contract, against real Redis: after a node drains and leaves, the group
+// names only the nodes that are still running. This is what stops the group
+// growing by one entry per pod per rollout.
+func TestIntegration_RemoveConsumerOnShutdown(t *testing.T) {
+	rdb := startRedis(t)
+	ctx := context.Background()
+
+	leaving := &dispatch.Dispatcher{Deps: dispatch.Deps{Redis: rdb}, NodeID: "node-leaving"}
+	if err := leaving.EnsureGroup(ctx); err != nil {
+		t.Fatalf("EnsureGroup: %v", err)
+	}
+
+	id, err := rdb.XAdd(ctx, &redis.XAddArgs{Stream: dispatch.PendingStream, Values: newStreamMessage()}).Result()
+	if err != nil {
+		t.Fatalf("XAdd: %v", err)
+	}
+	if _, err := rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group:    dispatch.ConsumerGroup,
+		Consumer: "node-leaving",
+		Streams:  []string{dispatch.PendingStream, ">"},
+		Count:    10,
+		Block:    -1,
+	}).Result(); err != nil {
+		t.Fatalf("XReadGroup: %v", err)
+	}
+
+	// Still holding the entry: the shutdown path must refuse to delete.
+	if err := leaving.RemoveConsumer(ctx); err != nil {
+		t.Fatalf("RemoveConsumer (holding): %v", err)
+	}
+	infos, err := rdb.XInfoConsumers(ctx, dispatch.PendingStream, dispatch.ConsumerGroup).Result()
+	if err != nil {
+		t.Fatalf("XInfoConsumers: %v", err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("consumers while holding a pending entry = %d, want 1 (delete must be refused)", len(infos))
+	}
+
+	// Drained: now it goes.
+	if err := rdb.XAck(ctx, dispatch.PendingStream, dispatch.ConsumerGroup, id).Err(); err != nil {
+		t.Fatalf("XAck: %v", err)
+	}
+	if err := leaving.RemoveConsumer(ctx); err != nil {
+		t.Fatalf("RemoveConsumer (drained): %v", err)
+	}
+	infos, err = rdb.XInfoConsumers(ctx, dispatch.PendingStream, dispatch.ConsumerGroup).Result()
+	if err != nil {
+		t.Fatalf("XInfoConsumers: %v", err)
+	}
+	if len(infos) != 0 {
+		t.Fatalf("consumers after a graceful shutdown = %d, want 0", len(infos))
+	}
+}

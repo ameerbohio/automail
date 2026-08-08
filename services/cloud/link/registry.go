@@ -32,6 +32,20 @@ func (r *Registry) Add(mailboxID string, conn *websocket.Conn) {
 	r.conns[mailboxID] = conn
 }
 
+// Conns returns a snapshot of the live sockets. Used by Hub.Close on
+// shutdown; the slice is a copy, so callers can take as long as they like
+// closing connections without holding the lock (or blocking a reconnect that
+// wants to Add).
+func (r *Registry) Conns() []*websocket.Conn {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	conns := make([]*websocket.Conn, 0, len(r.conns))
+	for _, c := range r.conns {
+		conns = append(conns, c)
+	}
+	return conns
+}
+
 // Remove deletes the entry only if it still points at conn. Guards against
 // a slow teardown of an old connection clobbering a newer reconnect that
 // already replaced it in the map.

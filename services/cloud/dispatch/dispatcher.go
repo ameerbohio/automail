@@ -18,6 +18,23 @@ import (
 // to reclaim and retry.
 const claimMinIdle = 60 * time.Second
 
+// handleTimeout bounds a single dispatch attempt. handle deliberately runs on
+// a context *detached* from Run's (see its doc comment), so this is the only
+// thing that stops a wedged Postgres/Redis call from holding shutdown open --
+// it must stay comfortably below main.go's shutdown grace.
+const handleTimeout = 15 * time.Second
+
+// reapMinIdle is how long a consumer must have gone without touching Redis
+// before the reaper deletes it. It is deliberately a multiple of
+// claimMinIdle: a dead consumer's pending entries only become reclaimable
+// after claimMinIdle, and reclaiming reassigns them to the *live* consumer
+// that claimed them (emptying the dead one's PEL). Reaping at 5x leaves ample
+// room for a sweep to have run first, so the reaper never races the reclaim
+// path. A live node refreshes its idle clock on every XREADGROUP, and Run
+// drains at least once per sweepInterval (= claimMinIdle), so a healthy node
+// is never within an order of magnitude of this threshold.
+const reapMinIdle = 5 * claimMinIdle
+
 // The dispatcher subscribes once to every mailbox's availability channel via
 // PSUBSCRIBE (store.PatternAvailable) rather than one SUBSCRIBE per
 // mailbox_id: it has no registry of which mailboxes exist (that's exactly the
@@ -33,6 +50,9 @@ type Dispatcher struct {
 	Deps     Deps
 	NodeID   string // unique per node instance; the Redis consumer name
 	SweepInt time.Duration
+	// ReapIdle overrides reapMinIdle (tests only -- waiting out the real
+	// threshold would make the suite minutes long). Zero means the default.
+	ReapIdle time.Duration
 }
 
 // EnsureGroup creates the jobs:pending consumer group if it doesn't exist
@@ -48,8 +68,14 @@ func (di *Dispatcher) EnsureGroup(ctx context.Context) error {
 
 // Run blocks until ctx is cancelled, draining jobs:pending whenever a
 // mailbox:<id>:available event fires and periodically sweeping for
-// crashed-node leftovers via XAUTOCLAIM. Intended to be started once per
-// node in a goroutine from main.go.
+// crashed-node leftovers via XAUTOCLAIM and for stale consumers left behind
+// by nodes that died ungracefully. Intended to be started once per node in a
+// goroutine from main.go.
+//
+// Cancelling ctx stops this node *reading* new work and returns promptly;
+// any dispatch already in progress finishes on a detached context (see
+// handle), so a message is never left neither ACKed nor dispatched at the
+// moment main.go removes this consumer from the group.
 func (di *Dispatcher) Run(ctx context.Context) {
 	sub := di.Deps.Redis.PSubscribe(ctx, store.PatternAvailable)
 	defer sub.Close()
@@ -74,6 +100,7 @@ func (di *Dispatcher) Run(ctx context.Context) {
 		case <-sweep.C:
 			di.reclaim(ctx)
 			di.drain(ctx)
+			di.ReapStaleConsumers(ctx)
 		}
 	}
 }
@@ -120,6 +147,13 @@ func (di *Dispatcher) drain(ctx context.Context) {
 		}
 		for _, msg := range streams[0].Messages {
 			di.handle(ctx, msg)
+			// Shutdown landed mid-batch: finish the message in hand (handle
+			// already ran it to completion on a detached context) and stop
+			// reading. The rest of the batch stays in this consumer's PEL,
+			// which is exactly what RemoveConsumer checks before deleting it.
+			if ctx.Err() != nil {
+				return
+			}
 		}
 	}
 }
@@ -134,7 +168,18 @@ func (di *Dispatcher) drain(ctx context.Context) {
 // beyond retrying. A still-blocked attempt is left un-ACK'd in the PEL so
 // the next mailbox:<id>:available event or XAUTOCLAIM sweep retries the
 // same entry rather than multiplying it.
-func (di *Dispatcher) handle(ctx context.Context, msg redis.XMessage) {
+//
+// The attempt runs on a context detached from the caller's (bounded by
+// handleTimeout instead). Cancelling Run's context on SIGTERM must stop this
+// node reading *new* messages, but aborting an attempt already underway is
+// the one thing that could leave a message neither dispatched nor ACK'd at
+// precisely the moment shutdown deletes this consumer from the group
+// (plans/16-kubernetes.md §4.1). Finishing the attempt is bounded and cheap;
+// getting it wrong loses a job.
+func (di *Dispatcher) handle(callerCtx context.Context, msg redis.XMessage) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(callerCtx), handleTimeout)
+	defer cancel()
+
 	fields, err := JobRefFromValues(msg.Values)
 	if err != nil {
 		log.Printf("dispatch: malformed stream message %s: %v", msg.ID, err)
@@ -185,10 +230,101 @@ func (di *Dispatcher) reclaim(ctx context.Context) {
 		for _, msg := range msgs {
 			log.Printf("dispatch: reclaimed job from crashed consumer: %s", msg.ID)
 			di.handle(ctx, msg)
+			if ctx.Err() != nil {
+				return // shutting down; see drain's matching guard
+			}
 		}
 		if next == "0-0" || len(msgs) == 0 {
 			return
 		}
 		start = next
+	}
+}
+
+// RemoveConsumer deletes this node's consumer from the jobs:pending group.
+// Called once on graceful shutdown, after Run has returned, so the group
+// reflects the set of *live* nodes instead of growing by one entry per
+// container that ever existed (plans/16-kubernetes.md §4.2 — 4 consumers were
+// measured for 3 live nodes under Compose; a k8s Deployment leaks one per pod
+// per rollout).
+//
+// It is deliberately a no-op when this consumer still holds pending entries:
+// XGROUP DELCONSUMER *discards* the consumer's PEL rather than handing those
+// entries back, so deleting a consumer that still owns un-ACK'd messages
+// destroys the jobs XAUTOCLAIM was going to reclaim. Leaving the consumer is
+// harmless -- the reaper will take it once reclaim has drained its PEL.
+func (di *Dispatcher) RemoveConsumer(ctx context.Context) error {
+	deleted, err := di.deleteConsumerIfDrained(ctx, di.NodeID)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		log.Printf("dispatch: consumer %s still has pending entries; left in the group for XAUTOCLAIM", di.NodeID)
+		return nil
+	}
+	log.Printf("dispatch: removed consumer %s from group %s", di.NodeID, ConsumerGroup)
+	return nil
+}
+
+// deleteConsumerIfDrained removes name from the consumer group unless it
+// still owns PEL entries. Reports whether the delete actually happened.
+func (di *Dispatcher) deleteConsumerIfDrained(ctx context.Context, name string) (bool, error) {
+	pending, err := di.Deps.Redis.XPendingExt(ctx, &redis.XPendingExtArgs{
+		Stream:   PendingStream,
+		Group:    ConsumerGroup,
+		Start:    "-",
+		End:      "+",
+		Count:    1,
+		Consumer: name,
+	}).Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return false, err
+	}
+	if len(pending) > 0 {
+		return false, nil
+	}
+	if err := di.Deps.Redis.XGroupDelConsumer(ctx, PendingStream, ConsumerGroup, name).Err(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (di *Dispatcher) reapIdle() time.Duration {
+	if di.ReapIdle > 0 {
+		return di.ReapIdle
+	}
+	return reapMinIdle
+}
+
+// ReapStaleConsumers deletes consumers that have not touched Redis for
+// reapMinIdle. RemoveConsumer only helps when a node shuts down gracefully;
+// an OOMKill, a lost node or a `kill -9` leaves its consumer behind forever,
+// so this is the belt to that braces (plans/16-kubernetes.md §4.2).
+//
+// Same PEL rule as RemoveConsumer, for the same reason: a consumer that still
+// owns un-ACK'd entries is skipped, not deleted, so reaping can never destroy
+// work that XAUTOCLAIM is about to reclaim. This node's own consumer is
+// skipped outright -- it is by definition live.
+func (di *Dispatcher) ReapStaleConsumers(ctx context.Context) {
+	consumers, err := di.Deps.Redis.XInfoConsumers(ctx, PendingStream, ConsumerGroup).Result()
+	if err != nil {
+		// NOGROUP before the first job is ordinary, not an error worth noise.
+		if !strings.Contains(err.Error(), "NOGROUP") && !errors.Is(err, redis.Nil) {
+			log.Printf("dispatch: XINFO CONSUMERS: %v", err)
+		}
+		return
+	}
+	for _, c := range consumers {
+		if c.Name == di.NodeID || c.Idle < di.reapIdle() || c.Pending > 0 {
+			continue
+		}
+		deleted, err := di.deleteConsumerIfDrained(ctx, c.Name)
+		if err != nil {
+			log.Printf("dispatch: reap consumer %s: %v", c.Name, err)
+			continue
+		}
+		if deleted {
+			log.Printf("dispatch: reaped stale consumer %s (idle %s)", c.Name, c.Idle)
+		}
 	}
 }

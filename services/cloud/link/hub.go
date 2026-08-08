@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"sync"
 
 	"automail/cloud/db"
 	"automail/cloud/store"
@@ -95,6 +96,53 @@ func (h *Hub) Accept(ctx context.Context, w http.ResponseWriter, r *http.Request
 	h.mirrorLiveness(ctx, reg.MailboxID, "idle")
 
 	return h.readLoop(ctx, conn, reg.MailboxID)
+}
+
+// Close tells every printer connected to this node that the node is going
+// away, so it reconnects immediately instead of waiting out a TCP timeout.
+//
+// This exists because the printer link is a *hijacked* connection:
+// http.Server.Shutdown neither waits for hijacked conns nor closes them
+// (plans/16-kubernetes.md §4.1), so without this the socket simply dies with
+// the process. The printer's dial loop only learns that from a read error --
+// which, if the pod's network namespace disappears rather than sending a FIN,
+// can take minutes. A StatusGoingAway close frame makes it deliberate: the
+// printer sees a clean close and re-dials, landing on a surviving node.
+//
+// Each Close is bounded internally (the library's close handshake times out
+// after 5s) and they run concurrently, but the whole set is also bounded by
+// ctx so one wedged socket cannot hold shutdown open.
+func (h *Hub) Close(ctx context.Context) {
+	conns := h.Registry.Conns()
+	if len(conns) == 0 {
+		return
+	}
+	log.Printf("printer-link: closing %d printer socket(s) with going-away", len(conns))
+
+	var wg sync.WaitGroup
+	for _, conn := range conns {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := conn.Close(websocket.StatusGoingAway, "cloud-server shutting down"); err != nil {
+				// The peer never echoed the close frame (or the socket was
+				// already broken). Drop it hard rather than leaving a
+				// half-closed conn behind.
+				_ = conn.CloseNow()
+			}
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		log.Printf("printer-link: close handshake did not finish before the shutdown deadline")
+	}
 }
 
 // readLoop processes state and status frames until the socket errors out

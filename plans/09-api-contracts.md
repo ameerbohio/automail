@@ -21,11 +21,26 @@ Metadata only: a consumer name, never a secret, and never anything derived from 
 ### `GET /healthz`
 
 **Auth**: None  
-**Response**: `200 OK` if Postgres and Redis reachable; `503` otherwise.
+**Response**: `200 OK` if Postgres and Redis reachable; `503` otherwise. Also `503` once the process has begun a graceful shutdown (`{"error":{"code":"DRAINING"}}`), so nothing new is routed to a node that is on its way out.
 
 ```json
 { "status": "ok" }
 ```
+
+This is the **readiness** probe: "should traffic be routed here". Traefik's health check keeps using it.
+
+---
+
+### `GET /livez`
+
+**Auth**: None  
+**Response**: `200 OK` whenever the process is serving its mux.
+
+```json
+{ "status": "ok" }
+```
+
+This is the **liveness** probe: "is this process wedged". It deliberately checks no dependency — a liveness probe that pings Postgres/Redis turns a dependency blip into a simultaneous restart of every node — and it keeps returning `200` while draining, since a process shutting down gracefully must be left alone to finish (`plans/16-kubernetes.md` §4.4).
 
 ---
 

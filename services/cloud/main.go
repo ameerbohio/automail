@@ -8,10 +8,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	"automail/cloud/db"
@@ -94,28 +98,31 @@ func internalTLSConfig(caPool *x509.CertPool) *tls.Config {
 	}
 }
 
-func startMTLSServer(addr string, srv *handlers.Server) error {
+// newMTLSServer builds the internal listener. It returns the *http.Server
+// rather than starting and blocking on it (as it did before) because
+// shutdown needs a handle: draining the public listener while this one is
+// killed by process exit leaves the printer link exactly as abruptly severed
+// as having no signal handling at all (plans/16-kubernetes.md §4.1).
+func newMTLSServer(addr string, srv *handlers.Server) (*http.Server, error) {
 	caCert, err := os.ReadFile(os.Getenv("MTLS_CA_CERT_PATH")) // #nosec G304 G703 -- operator-configured internal CA path (env), not user input
 	if err != nil {
-		return err
+		return nil, err
 	}
 	caPool := x509.NewCertPool()
 	if !caPool.AppendCertsFromPEM(caCert) {
-		log.Fatal("failed to parse internal CA cert")
+		return nil, errors.New("failed to parse internal CA cert")
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/internal/healthz", internalHealthzHandler)
 	mux.HandleFunc("GET /internal/printer-link", srv.PrinterLink)
 
-	server := &http.Server{
+	return &http.Server{
 		Addr:              addr,
 		Handler:           mux,
 		TLSConfig:         internalTLSConfig(caPool),
 		ReadHeaderTimeout: 10 * time.Second,
-	}
-	log.Printf("cloud-server internal mTLS listener on %s", addr)
-	return server.ListenAndServeTLS(os.Getenv("MTLS_CLOUD_CERT_PATH"), os.Getenv("MTLS_CLOUD_KEY_PATH"))
+	}, nil
 }
 
 func mustEnv(key string) string {
@@ -131,6 +138,14 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	// SIGTERM is how both substrates ask this process to stop: `docker compose
+	// stop` sends it, and so does every Kubernetes rolling update, eviction and
+	// HPA scale-down -- to a pod that is often still receiving traffic, since
+	// Endpoints removal and the signal race. Everything below hangs off this
+	// context (plans/16-kubernetes.md §4.1).
+	rootCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
 
 	sqlDB, err := sql.Open("postgres", mustEnv("DATABASE_URL"))
 	if err != nil {
@@ -204,6 +219,14 @@ func main() {
 	hub.DeleteBlob = func(ctx context.Context, blobRef string) error {
 		return minioclient.RemoveBlob(ctx, minioClient, blobRef)
 	}
+	// drain is closed once, at the top of the shutdown sequence. Handlers that
+	// block (StreamJob) select on it so they end deliberately instead of
+	// holding Shutdown open for the full grace period -- Shutdown waits for
+	// in-flight requests but never cancels their contexts.
+	drain := make(chan struct{})
+	var drainOnce sync.Once
+	startDraining := func() { drainOnce.Do(func() { close(drain) }) }
+
 	srv := &handlers.Server{
 		Queries:         queries,
 		SQLDB:           sqlDB,
@@ -215,6 +238,7 @@ func main() {
 		JWTPub:          jwtPub,
 		Hub:             hub,
 		Dispatcher:      dispatchDeps,
+		Drain:           drain,
 	}
 
 	// nodeID identifies this process as a Redis Streams consumer
@@ -233,10 +257,24 @@ func main() {
 	if err := dispatcher.EnsureGroup(context.Background()); err != nil {
 		log.Fatalf("dispatch: create consumer group: %v", err)
 	}
-	go dispatcher.Run(context.Background())
+	// The dispatcher loop gets its own cancel so shutdown can stop this node
+	// reading new work *before* it deletes the consumer from the group, and
+	// wait for the loop to actually return in between.
+	dispatchCtx, stopDispatcher := context.WithCancel(context.Background())
+	defer stopDispatcher()
+	dispatcherDone := make(chan struct{})
+	go func() {
+		defer close(dispatcherDone)
+		dispatcher.Run(dispatchCtx)
+	}()
 
 	mux := http.NewServeMux()
+	// Readiness (dependency-checking) and liveness (process-only) are two
+	// different questions -- see the handlers' doc comments and
+	// plans/16-kubernetes.md §4.4. /livez lives on the public mux and is
+	// deliberately outside Traefik's guest rate-limit router.
 	mux.HandleFunc("GET /healthz", srv.Healthz)
+	mux.HandleFunc("GET /livez", srv.Livez)
 	mux.HandleFunc("GET /recipients", srv.SearchRecipients)
 	mux.HandleFunc("GET /recipients/{id}/public-key", srv.RecipientPublicKey)
 
@@ -263,10 +301,22 @@ func main() {
 	mux.Handle("GET /admin/jobs", requireAdmin(jwtPub)(http.HandlerFunc(srv.AdminJobs)))
 	mux.Handle("GET /admin/mailboxes", requireAdmin(jwtPub)(http.HandlerFunc(srv.AdminMailboxes)))
 
+	// serveErr carries a listener's fatal error to main's select below. Both
+	// listeners share it: a failure to bind must still exit non-zero, but it
+	// must not bypass the shutdown sequence the way the old log.Fatal did.
+	serveErr := make(chan error, 2)
+
+	var mtlsServer *http.Server
 	if mtlsPort := os.Getenv("MTLS_PORT"); mtlsPort != "" {
+		mtlsServer, err = newMTLSServer(":"+mtlsPort, srv)
+		if err != nil {
+			log.Fatalf("internal mTLS listener: %v", err)
+		}
+		log.Printf("cloud-server internal mTLS listener on %s", mtlsServer.Addr)
 		go func() {
-			if err := startMTLSServer(":"+mtlsPort, srv); err != nil {
-				log.Fatal(err)
+			err := mtlsServer.ListenAndServeTLS(os.Getenv("MTLS_CLOUD_CERT_PATH"), os.Getenv("MTLS_CLOUD_KEY_PATH"))
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				serveErr <- fmt.Errorf("internal mTLS listener: %w", err)
 			}
 		}()
 	}
@@ -288,7 +338,92 @@ func main() {
 		Handler:           nodeHeader(nodeID)(mux),
 		ReadHeaderTimeout: 10 * time.Second, // bound slow-header (Slowloris) clients
 	}
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatal(err)
+	// Belt to the braces of the explicit startDraining() below: any other path
+	// that calls Shutdown on this server (a test, a future caller) still
+	// releases the long-lived handlers. RegisterOnShutdown callbacks run in
+	// their own goroutine at the start of Shutdown, and drainOnce makes the
+	// double-close safe.
+	server.RegisterOnShutdown(startDraining)
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- fmt.Errorf("public listener: %w", err)
+		}
+	}()
+
+	select {
+	case err := <-serveErr:
+		// A listener died on its own (port in use, cert unreadable). Nothing
+		// to drain gracefully -- fail loudly and let the supervisor restart us.
+		log.Fatalf("cloud-server: %v", err)
+	case <-rootCtx.Done():
 	}
+
+	// Restore default signal handling: a second SIGTERM/SIGINT now kills the
+	// process outright, which is the escape hatch an operator expects when a
+	// drain is taking too long.
+	stopSignals()
+
+	grace := defaultShutdownGrace
+	if v := os.Getenv("SHUTDOWN_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			grace = d
+		} else {
+			log.Printf("shutdown: ignoring unparseable SHUTDOWN_TIMEOUT %q: %v", v, err)
+		}
+	}
+	log.Printf("cloud-server: signal received, draining (grace %s)", grace)
+
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), grace)
+	defer cancelShutdown()
+
+	// Order matters, and each step is the fix for a specific way this process
+	// used to break the system when it died (plans/16-kubernetes.md §4.1-4.2).
+	runShutdown(shutdownCtx, []shutdownStep{{
+		// First, and before anything blocking: release the handlers that would
+		// otherwise sit out the entire grace period, and start failing
+		// readiness so nothing new is routed here.
+		name: "signal-drain",
+		run: func(context.Context) error {
+			startDraining()
+			return nil
+		},
+	}, {
+		// Stop reading new work, then wait for the loop to actually return --
+		// an in-flight dispatch finishes on its own detached context.
+		name: "dispatcher-loop",
+		run: func(ctx context.Context) error {
+			stopDispatcher()
+			return waitFor(ctx, dispatcherDone)
+		},
+	}, {
+		// Only now is it safe to delete the consumer: the loop is idle, so
+		// what remains in its PEL is final (and RemoveConsumer refuses to
+		// delete a consumer that still holds entries -- DELCONSUMER discards
+		// a PEL rather than handing it back).
+		name: "consumer-group",
+		run:  dispatcher.RemoveConsumer,
+	}, {
+		// Hijacked WebSockets are invisible to Shutdown, so the printers this
+		// node owns must be told to go away explicitly or they wait out a TCP
+		// timeout before reconnecting elsewhere.
+		name: "printer-sockets",
+		run: func(ctx context.Context) error {
+			hub.Close(ctx)
+			return nil
+		},
+	}, {
+		name: "public-listener",
+		run:  server.Shutdown,
+	}, {
+		name: "internal-listener",
+		run: func(ctx context.Context) error {
+			if mtlsServer == nil {
+				return nil
+			}
+			return mtlsServer.Shutdown(ctx)
+		},
+	}})
+
+	log.Printf("cloud-server: shutdown complete")
 }

@@ -127,6 +127,14 @@ services:
 
   cloud-server:
     build: ./services/cloud
+    # Compose's analogue of Kubernetes' terminationGracePeriodSeconds. The
+    # server handles SIGTERM by draining (open SSE streams closed deliberately,
+    # in-flight requests finished, printer sockets sent going-away, its Redis
+    # consumer removed from the group) under a SHUTDOWN_TIMEOUT budget that
+    # defaults to 20s. Compose's own default is 10s, which would SIGKILL a slow
+    # drain mid-sequence and leave exactly the stale consumer this was built to
+    # prevent -- so the container's grace must exceed the process's budget.
+    stop_grace_period: 30s
     # Plain `depends_on: [minio]` only waits for the container to *start*,
     # not for MinIO's server to accept connections -- EnsureBucket (main.go)
     # fatals on the first connection-refused, crashing this container in the

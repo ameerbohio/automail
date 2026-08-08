@@ -40,6 +40,28 @@ type Server struct {
 
 	Hub        *link.Hub     // printer-link connection registry + dispatch routing (Phase 3)
 	Dispatcher dispatch.Deps // immediate-dispatch dependencies, used by CreateJob (Phase 4)
+
+	// Drain is closed by main.go when the process receives SIGTERM. It is the
+	// explicit shutdown signal http.Server.Shutdown does *not* give handlers:
+	// Shutdown waits for in-flight requests but never cancels their contexts,
+	// so a long-lived handler (StreamJob) would pin the drain for the whole
+	// grace period and then be severed anyway (plans/16-kubernetes.md §4.1).
+	// Handlers that block should select on this and return deliberately.
+	//
+	// A nil channel blocks forever, which is exactly the right default: tests
+	// and any caller that never shuts down behave as they did before.
+	Drain <-chan struct{}
+}
+
+// draining reports whether shutdown has begun. Used by the readiness probe so
+// Kubernetes stops routing new traffic here while the drain runs.
+func (s *Server) draining() bool {
+	select {
+	case <-s.Drain:
+		return true
+	default:
+		return false
+	}
 }
 
 // uploadPresigner returns the MinIO client used to sign the browser-facing

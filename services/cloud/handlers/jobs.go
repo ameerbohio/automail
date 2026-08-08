@@ -295,8 +295,24 @@ func (s *Server) StreamJob(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
-			// Client went away (or server shutdown) -- the deferred
-			// sub.Close() unsubscribes this node from the channel.
+			// Client went away -- the deferred sub.Close() unsubscribes this
+			// node from the channel. Note this does NOT fire on server
+			// shutdown: Shutdown waits for in-flight requests, it never
+			// cancels their contexts. That is what s.Drain below is for.
+			return
+		case <-s.Drain:
+			// The process is shutting down. End the stream deliberately and
+			// immediately rather than pinning Shutdown for the whole grace
+			// period and being severed at the end of it anyway
+			// (plans/16-kubernetes.md §4.1).
+			//
+			// The comment line is not decoration: it is what distinguishes a
+			// deliberate close from a killed process on the wire, and it is
+			// what scripts/shutdown/ asserts. The client sees a clean EOF, and
+			// EventSource reconnects on its own -- landing on a node that is
+			// not draining, where the initial DB snapshot re-syncs any status
+			// it missed.
+			writeSSEComment(w, flusher, "draining: server shutting down, reconnect")
 			return
 		case msg, chOpen := <-ch:
 			if !chOpen {
@@ -372,6 +388,17 @@ func writeSSE(w http.ResponseWriter, flusher http.Flusher, ev streamEvent) bool 
 	}
 	flusher.Flush()
 	return true
+}
+
+// writeSSEComment emits an SSE comment line (":" prefix). Comments are part
+// of the wire format and every conforming client ignores them, so this is a
+// side channel for annotating the stream -- here, marking that the close was
+// the server draining rather than the connection failing.
+func writeSSEComment(w http.ResponseWriter, flusher http.Flusher, text string) {
+	if _, err := fmt.Fprintf(w, ": %s\n\n", text); err != nil {
+		return
+	}
+	flusher.Flush()
 }
 
 type historyJob struct {

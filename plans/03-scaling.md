@@ -190,6 +190,15 @@ func healthz(w http.ResponseWriter, r *http.Request) {
 
 Traefik removes unhealthy nodes from the rotation automatically.
 
+`/healthz` is the **readiness** answer, and it is also `503` while the node is draining after SIGTERM. The **liveness** answer is a separate `GET /livez` that checks nothing but the mux: a probe that restarts a process because Redis blipped would restart every node at once. See `plans/16-kubernetes.md` §4.4 and `docs/study/24-graceful-shutdown-consumer-lifecycle.md`.
+
+## Graceful Shutdown
+
+A node that receives SIGTERM stops reading new work, finishes what it holds, and removes itself from the shared state before exiting — see `plans/16-kubernetes.md` §4.1–§4.2 for the design and `docs/study/24-graceful-shutdown-consumer-lifecycle.md` for the reasoning. The two consequences that belong here, in the scaling story:
+
+- **`XGROUP DELCONSUMER` on the way out** keeps the `dispatchers` group naming only live nodes. Without it the group grows by one dead consumer per node instance ever started, and a dead consumer holding a pending message delays that message until `XAUTOCLAIM`'s `MinIdle` elapses. The delete is skipped when that consumer's PEL is non-empty — DELCONSUMER *discards* a PEL rather than handing it back, so deleting a busy consumer would lose the job. A periodic reaper covers nodes that died without running the shutdown path.
+- **The printer socket is closed with `StatusGoingAway`**, so the printer's reconnect loop lands on a surviving node immediately instead of waiting out a TCP timeout. This is the deliberate version of the failover described above.
+
 ---
 
 ## Running Multiple Nodes (Prototype)

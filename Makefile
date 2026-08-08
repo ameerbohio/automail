@@ -100,6 +100,12 @@ test-e2e-full: ## Full-system E2E: two-node stack, real job to delivered + /dev/
 		echo "⚠ test-e2e-full skipped: no Docker daemon (Goal T8 needs the compose stack)"; exit 0; fi; \
 	bash scripts/e2e/full.sh
 
+.PHONY: shutdown-check
+shutdown-check: ## Graceful shutdown: consumer group tracks live nodes + SSE streams drain (Goal K0) — needs Docker
+	@if ! docker info >/dev/null 2>&1; then \
+		echo "⚠ shutdown-check skipped: no Docker daemon (Goal K0 needs the compose stack)"; exit 0; fi; \
+	bash scripts/shutdown/check.sh
+
 .PHONY: chaos
 chaos: ## Resilience/chaos: kill each component in turn, prove exactly-once + reconnect (Goal T9) — needs Docker
 	@if ! docker info >/dev/null 2>&1; then \

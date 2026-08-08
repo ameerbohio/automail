@@ -192,6 +192,26 @@ Answer: _(to be filled in)_
 
 ---
 
+## SIDE QUESTION — the reconnect window during a node's drain (Goal K0)
+
+**Q: the shutdown sequence closes the printer sockets this node owns
+(`StatusGoingAway`) *before* it shuts the internal mTLS listener down, so there
+is a sub-second window in which the printer's immediate re-dial can land back on
+the node that is leaving, register, and then be dropped again when the internal
+listener closes. The printer's backoff loop recovers (it re-dials and lands
+elsewhere), so the cost is one wasted round trip, not a lost job. Is closing the
+listener first — refusing new dials before hanging up on the existing ones — the
+better order, or does that just move the wasted round trip to a different
+printer?**
+*Context: with a Service in front of N pods the re-dial is load-balanced, so the
+odds of landing back on the draining pod are ~1/N and shrinking. Worth being able
+to say out loud that the ordering was considered and that the failure mode is
+bounded by the reconnect backoff, rather than being surprised by it. Related: K6
+is the goal that exercises the reconnect-onto-a-survivor path for real.*
+Answer: _(to be filled in)_
+
+---
+
 ## See also
 - [16-hybrid-encryption.md](16-hybrid-encryption.md) — answers the AES/RSA and passphrase-hygiene questions above
 - [.env.example](../../.env.example) — the unwired `REDIS_PASSWORD`
