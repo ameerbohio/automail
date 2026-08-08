@@ -4,7 +4,7 @@
 This is the owner checklist referenced by GOALS.md Goal 6, now fully closed:
 Step 1 (host prerequisites) was completed and verified directly on the Proxmox
 VM on 2026-07-20; Steps 2–4 (container image, compose wiring, `DEV_MODE=false`)
-landed in commit a8febee the same day; Step 5 (physical print Verify) closed
+landed in commit c660bbc the same day; Step 5 (physical print Verify) closed
 2026-07-23 after fixing an unrelated bug in the public-demo tooling that was
 silently swallowing print jobs — see the note at the end of this doc and
 GOALS.md's Status Log for the full story.
@@ -198,9 +198,9 @@ something to default silently. Whichever option is chosen should be recorded in
 | Where | Change | Status |
 |---|---|---|
 | Proxmox VM host | Install CUPS, add + test the physical printer queue (`Canon_MF240`) | ✅ done 2026-07-20 |
-| `services/printer/Dockerfile` | `apk add --no-cache cups-client` in the final stage | ✅ done 2026-07-20 (a8febee) |
-| `docker-compose.yml` (printer) | Mount `/run/cups/cups.sock` **or** set `CUPS_SERVER` | ✅ done 2026-07-20 (a8febee) |
-| `docker-compose.yml` / `.env` | `DEV_MODE=false`, `PRINTER_NAME=Canon_MF240` | ✅ done 2026-07-20 (a8febee) |
+| `services/printer/Dockerfile` | `apk add --no-cache cups-client` in the final stage | ✅ done 2026-07-20 (c660bbc) |
+| `docker-compose.yml` (printer) | Mount `/run/cups/cups.sock` **or** set `CUPS_SERVER` | ✅ done 2026-07-20 (c660bbc) |
+| `docker-compose.yml` / `.env` | `DEV_MODE=false`, `PRINTER_NAME=Canon_MF240` | ✅ done 2026-07-20 (c660bbc) |
 | Physical print Verify (paper out, correct content) | ✅ done 2026-07-23 (see note below) |
 | CUPS config (owner decision) | Spool-to-disk hardening per the security note | pending (owner decision) |
 
