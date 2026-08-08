@@ -55,3 +55,6 @@ testdata/crypto-contract/*.vector.json
 
 # Load-run reports (Goal T10); baseline.json + testdata/ ARE committed
 scripts/load/report/
+
+# Personal notes (interview prep, resume drafts) -- deliberately not published
+notes/

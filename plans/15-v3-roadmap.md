@@ -55,7 +55,7 @@ location V3 unlocks.
   large, separate body of work (replication topology, failover, split-brain, consistency).
 
 - **Current state (what V2 leaves).** Single Postgres/Redis/MinIO shared over the LAN.
-  `docs/resume-cheatsheet.md` already flags the per-stream Redis-subscription cost and
+  `notes/resume-cheatsheet.md` already flags the per-stream Redis-subscription cost and
   notes "at real scale you'd multiplex subscribers behind a shared fan-out."
 
 - **Sketch / considerations.**
@@ -98,7 +98,7 @@ location V3 unlocks.
 
 - **References.** `plans/03-scaling.md`; `services/cloud/dispatch/route.go` +
   `services/cloud/link/hub.go` (the Redis-mediated routing a distributed Redis must
-  preserve); `docs/resume-cheatsheet.md` (subscription-cost note); `plans/13`
+  preserve); `notes/resume-cheatsheet.md` (subscription-cost note); `plans/13`
   (multi-node topology this builds on).
 
 ---
