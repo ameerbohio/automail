@@ -1,0 +1,85 @@
+# The printer, running OUTSIDE the Kubernetes cluster and dialing into it
+# (Goal K5 / plans/16-kubernetes.md §6). Brought up by `make k8s-e2e`
+# (scripts/k8s/e2e.sh); never layered on docker-compose.yml.
+#
+# WHY A STANDALONE FILE AND NOT AN OVERRIDE. Two reasons, both structural:
+#
+#   1. `network_mode: host` and the base printer's `networks: [automail]` are
+#      mutually exclusive in the Compose spec, and an override can add to a
+#      service's network list but never empty it. Likewise the base printer's
+#      `depends_on: cloud-server` cannot be removed by an override, so
+#      `docker compose up printer` would drag the whole Compose stack up
+#      alongside the cluster.
+#   2. Its own project name keeps this container disjoint from a running
+#      Compose stack. Both stacks are expected to be up at once on this host
+#      (Kubernetes Track Process Rule 3 — the Compose path keeps working), and
+#      the two printers are then two independent mailbox units that happen to
+#      share a MAILBOX_ID while pointing at two independent databases.
+#
+# WHY HOST NETWORKING. The printer verifies the cloud-server certificate whose
+# SANs are `DNS:cloud-server, DNS:localhost` (infra/certs/gen.sh), and
+# services/printer/mtls.go sets no ServerName — so the dial host must literally
+# be `localhost` (plans/16-kubernetes.md §6.1, option (a): keep the PKI
+# untouched rather than reissue every Compose consumer's cert). k3d publishes
+# the mTLS NodePort on 127.0.0.1:9843 *of the host*, and inside a bridged
+# container `localhost` is the container itself — so the container must share
+# the host's network namespace for that name to mean the right thing.
+#
+# Compose interpolates on EVERY subcommand, so the K8S_MINIO_HOST_IP guard
+# below binds `down`, `logs` and `ps` as much as `up`. Reaching for one of those
+# by hand, outside `make k8s-e2e`:
+#   K8S_MINIO_HOST_IP=0.0.0.0 docker compose -f docker-compose.k8s-printer.yml logs
+name: automail-k8s
+
+services:
+  printer:
+    build: ./services/printer
+    container_name: automail-k8s-printer
+    network_mode: host
+    # The dispatch frame carries a pre-signed GET URL that the cloud server
+    # signs with its INTERNAL MinIO client, so its host is `minio:9000` — a
+    # name that only resolves inside the cluster, and one SigV4 has signed into
+    # the request, port included (redirect it and the signature fails). The
+    # k3d overlay gives the MinIO pod a `hostPort: 9000` inside its k3d NODE
+    # container, and this alias maps the signed name onto that node's IP — so
+    # the Host header stays `minio:9000` and the signature verifies unchanged.
+    # scripts/k8s/e2e.sh discovers the IP (`kubectl get pod minio-0
+    # -o jsonpath='{.status.hostIP}'`) and exports it; there is no sane default,
+    # because k3d node IPs are assigned by Docker and move when the network is
+    # recreated. See the long note in infra/k8s/overlays/k3d-local for why a
+    # NodePort, a k3d port mapping and `kubectl port-forward` all fail here.
+    extra_hosts:
+      - "minio:${K8S_MINIO_HOST_IP:?set by scripts/k8s/e2e.sh -- run `make k8s-e2e`}"
+    environment:
+      MAILBOX_ID: ${DEV_MAILBOX_ID:-00000000-0000-0000-0000-000000000001}
+      # Must equal the seeded mailbox_slots.id (scripts/e2e/seed.sh), or the
+      # cloud's eligibility check finds no slot and every job sits in `queued`.
+      SLOT_ID: ${SLOT_ID:-22222222-2222-2222-2222-222222222222}
+      # The k3d host mapping frozen in infra/k8s/k3d-cluster.yaml
+      # (127.0.0.1:9843 -> nodePort 30843 -> cloud-server-mtls Service). Every
+      # cloud-server pod is a valid endpoint; which one answers is kube-proxy's
+      # choice, and that arbitrariness is exactly what the fan-in test exploits.
+      CLOUD_SERVER_WS_URL: ${K8S_PRINTER_WS_URL:-wss://localhost:9843/internal/printer-link}
+      MTLS_CA_CERT_PATH: /certs/ca-cert.pem
+      MTLS_CERT_PATH: /certs/printer-cert.pem
+      MTLS_KEY_PATH: /certs/printer-key.pem
+      HEARTBEAT_INTERVAL: "30"
+      RECONNECT_MAX_BACKOFF: "30"
+      # The whole Kubernetes track runs the printer in dev mode: the physical
+      # CUPS queue belongs to the Compose/Proxmox deploy, and `lp` is the only
+      # thing DEV_MODE skips — the RSA/AES decrypt, the /dev/shm write and the
+      # unlink-before-status all still run, which is what the acceptance checks.
+      DEV_MODE: "true"
+      # Host networking means this binds a HOST port. 8444 is deliberately the
+      # same port the bridged Compose printer uses internally; nothing publishes
+      # it, so the two never collide.
+      LISTEN_ADDR: ":8444"
+      PRINTER_PRIVATE_KEY_PATH: /certs/printer-private.pem
+      PRINTER_KEY_PASSPHRASE: ${PRINTER_KEY_PASSPHRASE:-changeme-printer-passphrase}
+    volumes:
+      - ./infra/certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8444/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5

@@ -1,9 +1,10 @@
-//go:build e2e || chaos || smoke || shutdown
+//go:build e2e || chaos || smoke || shutdown || k8s
 
 // Shared harness for the full-system E2E (Goal T8, build tag `e2e`), the
 // resilience/chaos suite (Goal T9, build tag `chaos`), the deployment-parity
-// smoke (Goal T12, build tag `smoke`) and the graceful-shutdown check (Goal K0,
-// build tag `shutdown`). All of them drive the product's real HTTP
+// smoke (Goal T12, build tag `smoke`), the graceful-shutdown check (Goal K0,
+// build tag `shutdown`) and the Kubernetes cluster E2E (Goal K5, build tag
+// `k8s`). All of them drive the product's real HTTP
 // contract and the browser's exact crypto wire format -- with nothing but the Go
 // standard library -- against a live compose stack that
 // scripts/e2e/{full,chaos}.sh, scripts/deploy/smoke.sh and
@@ -331,13 +332,31 @@ func dockerCompose(t *testing.T, extra ...string) string {
 	return string(out)
 }
 
+// devShmListing returns the printer container's /dev/shm listing. The printer
+// is reached through docker-compose by default; E2E_PRINTER_CONTAINER names it
+// directly instead, which is what the Goal K5 cluster suite needs -- there the
+// printer is a standalone container in its own Compose project (it must be, to
+// take `network_mode: host`), so the shared composeArgs would address the wrong
+// stack or none at all.
+func devShmListing(t *testing.T) string {
+	t.Helper()
+	const cmd = "ls -A /dev/shm 2>/dev/null || true"
+	if name := os.Getenv("E2E_PRINTER_CONTAINER"); name != "" {
+		out, err := exec.Command("docker", "exec", name, "sh", "-c", cmd).CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker exec %s: %v\n%s", name, err, out)
+		}
+		return string(out)
+	}
+	return dockerCompose(t, "exec", "-T", "printer", "sh", "-c", cmd)
+}
+
 // assertDevShmClean execs into the printer container and asserts no automail job
 // file remains under /dev/shm -- the plaintext PDF was unlinked before the
 // delivered callback and never touched disk elsewhere.
 func assertDevShmClean(t *testing.T) {
 	t.Helper()
-	out := dockerCompose(t, "exec", "-T", "printer", "sh", "-c", "ls -A /dev/shm 2>/dev/null || true")
-	listing := strings.TrimSpace(out)
+	listing := strings.TrimSpace(devShmListing(t))
 	for _, name := range strings.Fields(listing) {
 		if strings.HasPrefix(name, "automail-") || strings.HasSuffix(name, ".pdf") {
 			t.Fatalf("plaintext left in /dev/shm after delivered: %q (full listing: %q)", name, listing)

@@ -179,6 +179,10 @@ k8s-edge-check: ## Ingress: 3 hostnames, sniStrict, CSP/presign port cascade, ra
 k8s-edge-browser: ## Browser (Playwright) guest flow through the ingress — Goal K4
 	@cd $(PORTAL) && npx playwright test -c playwright.k8s.config.ts
 
+.PHONY: k8s-e2e
+k8s-e2e: ## Printer outside the cluster: job through the ingress to delivered + fan-in — Goal K5
+	@bash scripts/k8s/e2e.sh
+
 .PHONY: k8s-down
 k8s-down: ## Delete the k3d cluster and verify no containers/networks/volumes leak — Goal K1
 	@bash scripts/k8s/down.sh

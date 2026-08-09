@@ -344,6 +344,25 @@ default beyond the API server. Both the ingress ports (§8.1) and this mTLS Node
 declared in `infra/k8s/k3d-cluster.yaml` up front; retrofitting a port means destroying and
 recreating the cluster.
 
+**A fourth obstacle, found on the first K5 run and not anticipated above: object storage.**
+The dial-in is only half the printer's network use — it then fetches the ciphertext from the
+pre-signed GET URL in the dispatch frame. `dispatch/route.go` signs that URL with
+cloud-server's **internal** MinIO client, so its host is `minio:9000`, and SigV4 signs the
+`Host` header *including the port* — the request cannot be redirected to another address
+without invalidating the signature. Whatever the printer dials must therefore answer to the
+literal name `minio` on port 9000. A NodePort cannot (range 30000–32767, and the port is in
+the signature); a k3d host mapping cannot (frozen at creation, per the paragraph above);
+`kubectl port-forward` cannot, because `docker-compose.{e2e,full}.yml` publish the *Compose*
+MinIO on `0.0.0.0:9000` and the forward would either fail to bind or silently aim the printer
+at the wrong object store. What works is a **`hostPort: 9000` on the MinIO pod** in the k3d
+overlay: it binds inside the k3d *node* container, whose IP is routable from the host because
+k3d nodes are Docker containers on a bridge, and the printer maps the name onto that IP with
+`extra_hosts`. Measured: `172.19.0.2:9000` answers `/minio/health/live` from the host. It is
+overlay-only, and it is safe only because the data tier is already pinned to one node (§5) —
+a `hostPort` is a per-node exclusive resource and would otherwise cap replicas at one per
+node. `scripts/k8s/e2e.sh` resolves the node IP at run time (`kubectl get pod minio-0
+-o jsonpath='{.status.hostIP}'`); Docker assigns it, so it must never be hardcoded.
+
 ### 6.2 Proving fan-in when you cannot address a pod
 
 The Compose full-system suite proves fan-in by giving the two cloud replicas **distinct names
@@ -361,6 +380,19 @@ Seeding has the same shape of problem: `scripts/e2e/seed.sh` execs `psql` throug
 `docker compose exec postgres` (parameterised only over *which Compose files*). A cluster run
 needs a `kubectl exec` backend for it, reading the same `.env` values that populate the K2
 Secret.
+
+**Resolved in K5 (`scripts/k8s/e2e.sh`): the first option, plus a step the list above omits —
+the owner must be *discovered* before a non-owner can be chosen.** Under Compose the owner is
+known by construction (the printer dials a fixed alias); here kube-proxy picks. So the script
+timestamps the printer container's creation, waits for `mailbox:<id>:state` to read `idle`
+(the hub seeds that key only after acking the register frame, making it the reliable
+readiness signal — the socket existing is not), then greps every cloud-server pod's logs with
+`--since-time` for `printer-link: mailbox <id> registered`, newest line winning so a mid-run
+reconnect resolves correctly. It port-forwards to any other pod, and `e2e/k8s_test.go`
+re-checks the `X-Automail-Node` header before trusting the forward — a forward accidentally
+aimed at the owner would make the fan-in assertion pass for the wrong reason. Observed across
+two consecutive runs: the socket landed on two different pods, which is the property, not a
+flake.
 
 ---
 

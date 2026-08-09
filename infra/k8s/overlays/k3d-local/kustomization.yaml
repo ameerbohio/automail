@@ -103,6 +103,46 @@ patches:
         path: /spec/ports/0/nodePort
         value: 30843
 
+  # MAKE OBJECT STORAGE REACHABLE FROM THE PRINTER, WHICH LIVES OUTSIDE THE
+  # CLUSTER (Goal K5, plans/16-kubernetes.md §6).
+  #
+  # The dispatch frame carries a pre-signed GET URL, and cloud-server signs it
+  # with its INTERNAL MinIO client — so its host is `minio:9000`. SigV4 signs
+  # the Host header, port included, so the printer cannot be redirected to some
+  # other address: whatever it dials must answer to the name `minio` on port
+  # 9000. Three ways to give an outside process that, and only one works here:
+  #
+  #   * a NodePort — impossible, the range is 30000–32767 and the port is
+  #     baked into the signature;
+  #   * a k3d host port mapping — impossible without recreating the cluster
+  #     (and every PVC with it), since k3d freezes them at creation time;
+  #   * a hostPort — binds inside the k3d NODE container, whose IP is routable
+  #     from this host because k3d nodes are Docker containers on a bridge.
+  #
+  # So the printer maps the name `minio` to the node IP MinIO landed on
+  # (`kubectl get pod minio-0 -o jsonpath='{.status.hostIP}'`, wired into
+  # docker-compose.k8s-printer.yml by scripts/k8s/e2e.sh) and the signature
+  # verifies unchanged.
+  #
+  # WHY NOT `kubectl port-forward` ON THE HOST: 9000 on the host is not ours to
+  # take. docker-compose.e2e.yml and docker-compose.full.yml publish the
+  # *Compose* MinIO on 0.0.0.0:9000, so a forward would either fail to bind or,
+  # worse, silently point the printer at the wrong object store and 404 on
+  # every blob. Binding inside the node container sidesteps the host's port
+  # space entirely, which is what keeps both stacks up at once (Process Rule 3).
+  #
+  # This is an overlay-only affordance. It is safe *because* the data tier is
+  # pinned to one node above (a hostPort is a per-node exclusive resource, so
+  # it would cap replicas at one per node otherwise), and it is exactly the
+  # kind of local-host detail a proxmox overlay would drop.
+  - target:
+      kind: StatefulSet
+      name: minio
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/ports/0/hostPort
+        value: 9000
+
   # THE FOURTH COUPLED VALUE (§8.1): the CSP's connect-src.
   #
   # A CSP host-source without a port means the scheme's DEFAULT port, so

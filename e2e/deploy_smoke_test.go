@@ -19,50 +19,19 @@
 package e2e
 
 import (
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-// The production hostnames Traefik routes. These are the names the browser uses
-// and the names the edge certificate must carry SANs for; nothing here may fall
-// back to localhost or a published port, or the suite stops testing the edge.
-const (
-	portalHost = "automail.local"
-	apiHost    = "api.automail.local"
-	blobHost   = "blob.automail.local"
-)
-
-// smokeConfig is resolved once in TestMain from the env scripts/deploy/smoke.sh
-// sets.
-type smokeConfig struct {
-	httpsPort string         // host port Traefik's websecure entrypoint is published on
-	edgePool  *x509.CertPool // trusts the self-signed edge cert (browsers get a warning, not a failure)
-	dialAddr  string         // where the routed hostnames actually live
-}
-
-var smoke smokeConfig
-
-// TestMain wires the whole suite to the edge. It installs a DefaultTransport
-// that (a) trusts the self-signed edge cert and (b) maps every routed hostname to
-// the published Traefik port -- the programmatic equivalent of curl's
-// `--resolve`, and of the hosts-file entry a real deploy needs
-// (docs/deploy-checklist.md). Doing it at the transport layer means the shared
-// harness helpers drive real `https://api.automail.local/...` URLs with no
-// knowledge that the edge is involved, so what they exercise is what a browser
-// would.
-//
-// InsecureSkipVerify is deliberately NOT used: the cert is self-signed, not
-// invalid, and pinning it here is what makes "the edge serves the cert we
-// generated, for the SNI we asked for" an assertion rather than an assumption.
+// TestMain resolves this suite's edge (published Traefik port on the Compose
+// host) and hands it to the shared installer in edge.go, which the Goal K5
+// cluster suite reuses against the k3d ingress.
 func TestMain(m *testing.M) {
 	root := os.Getenv("E2E_REPO_ROOT")
 	if root == "" {
@@ -78,53 +47,21 @@ func TestMain(m *testing.M) {
 		host = "127.0.0.1"
 	}
 
-	pem, err := os.ReadFile(filepath.Join(root, "infra", "traefik", "edge-cert.pem"))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "read edge cert: %v\n(run ./infra/certs/gen-edge-certs.sh)\n", err)
+	if err := installEdgeTransport(root, host, port); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pem) {
-		fmt.Fprintln(os.Stderr, "infra/traefik/edge-cert.pem contains no usable certificate")
-		os.Exit(1)
-	}
-
-	smoke = smokeConfig{httpsPort: port, edgePool: pool, dialAddr: net.JoinHostPort(host, port)}
-
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
-	tr.DialContext = smoke.dialViaEdge
-	// SSE must stream, not buffer -- streamToTerminal reads events as they land.
-	tr.ResponseHeaderTimeout = 30 * time.Second
-	http.DefaultTransport = tr
-	http.DefaultClient = &http.Client{Transport: tr}
 
 	os.Exit(m.Run())
-}
-
-// dialViaEdge redirects the routed hostnames to the published Traefik port while
-// leaving the TLS ServerName as the original hostname, so SNI -- and therefore
-// the router rule and sniStrict -- are exercised exactly as in production.
-func (c smokeConfig) dialViaEdge(ctx context.Context, network, addr string) (net.Conn, error) {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return nil, err
-	}
-	switch host {
-	case portalHost, apiHost, blobHost:
-		addr = c.dialAddr
-	}
-	var d net.Dialer
-	return d.DialContext(ctx, network, addr)
 }
 
 // dialSNI opens a raw TLS connection to the edge announcing serverName, and
 // returns the handshake error (nil on success) plus the leaf certificate served.
 func dialSNI(t *testing.T, serverName string) (*x509.Certificate, error) {
 	t.Helper()
-	conn, err := tls.Dial("tcp", smoke.dialAddr, &tls.Config{
+	conn, err := tls.Dial("tcp", edge.dialAddr, &tls.Config{
 		ServerName: serverName,
-		RootCAs:    smoke.edgePool,
+		RootCAs:    edge.edgePool,
 		MinVersion: tls.VersionTLS12,
 	})
 	if err != nil {
@@ -170,7 +107,7 @@ func TestEdgeTLS_RoutedHostnamesHandshake(t *testing.T) {
 // server alert. "Some error occurred" would then pass in both worlds. Skipping
 // verification makes the assertion specifically about what the SERVER did.
 func TestEdgeTLS_UnknownSNIRejected(t *testing.T) {
-	conn, err := tls.Dial("tcp", smoke.dialAddr, &tls.Config{
+	conn, err := tls.Dial("tcp", edge.dialAddr, &tls.Config{
 		ServerName:         "not-a-routed-host.invalid",
 		InsecureSkipVerify: true, //nolint:gosec // asserting the server's rejection, not trusting the peer
 		MinVersion:         tls.VersionTLS12,
