@@ -16,13 +16,35 @@ storage yields ciphertext and metadata.
 
 ```mermaid
 flowchart LR
-    B["Browser<br/>AES-256-GCM + RSA-OAEP"] -->|ciphertext| S3[("Object storage<br/>(pre-signed PUT)")]
-    B -->|"wrapped key + metadata"| C["Cloud server (Go)<br/><b>zero-knowledge</b>"]
-    C -->|"Redis Streams<br/>exactly-once dispatch"| C
-    C <-->|"mTLS WebSocket<br/>(printer dials out)"| P["Printer in the<br/>mailbox unit"]
+    B["Browser<br/>AES-256-GCM + RSA-OAEP"]
+    C["Cloud server (Go)<br/>N stateless nodes<br/><b>zero-knowledge</b>"]
+    S3[("Object storage<br/>ciphertext only")]
+    PG[("PostgreSQL<br/>job rows + audit log")]
+    P["Printer in the<br/>mailbox unit"]
+    PR["📄 paper"]
+
+    subgraph R ["Redis"]
+        direction TB
+        PS(["<b>mailbox:{id}:dispatch</b><br/>pub/sub"])
+        ST(["<b>jobs:pending</b><br/>Stream + consumer group"])
+    end
+
+    B -->|"ciphertext (pre-signed PUT)"| S3
+    B -->|"wrapped key + metadata"| C
+    C -->|"claim the row first:<br/>SELECT ... FOR UPDATE NOWAIT<br/><b>the double-dispatch guard</b>"| PG
+    C -->|"publish the job"| PS
+    PS -->|"reaches whichever node<br/>holds that printer's socket"| C
+    C -->|"printer busy or offline:<br/>XADD and retry later"| ST
+    ST -->|"XREADGROUP — <b>at-least-once</b>,<br/>re-attempted when a printer frees up"| C
+    C <-->|"mTLS WebSocket<br/>(printer dials out)"| P
     S3 -.->|"pre-signed GET"| P
-    P -->|"decrypt in RAM → print → wipe"| PR["📄 paper"]
+    P -->|"decrypt in RAM → print → wipe"| PR
 ```
+
+Two mechanisms, deliberately not one. The Redis Stream's consumer group decides **which node**
+picks up a queued job and guarantees the entry survives a node dying mid-attempt — that is
+at-least-once delivery, not exactly-once processing. The guarantee that a job is never dispatched
+twice is the Postgres row lock, which also covers the immediate path that never touches the queue.
 
 It is a personal/portfolio project, built to production discipline: written specs before code,
 per-phase acceptance criteria, security invariants enforced as build-failing tests, and every
@@ -38,7 +60,7 @@ Four one-page summaries, each linking to the evidence behind every claim:
 |---|---|
 | [Security & cryptography](00-PROJECT-SUMMARIES/security.md) | Hybrid E2EE, the zero-knowledge boundary, and invariants that **fail the build** rather than living in a comment |
 | [Testing & quality](00-PROJECT-SUMMARIES/testing.md) | 127 Go tests, fuzzing, contract tests across two languages, chaos, load gates, browser E2E |
-| [Kubernetes & distributed systems](00-PROJECT-SUMMARIES/kubernetes.md) | Rolling updates with zero dropped requests, autoscaling 2→7 pods, exactly-once dispatch across nodes |
+| [Kubernetes & distributed systems](00-PROJECT-SUMMARIES/kubernetes.md) | Rolling updates with zero dropped requests, autoscaling 2→7 pods, no job dispatched twice across nodes |
 | [Full-stack portal](00-PROJECT-SUMMARIES/portal.md) | Next.js/TypeScript UI doing real cryptography in the browser, live status over SSE, JWT + RBAC |
 
 Start at [00-PROJECT-SUMMARIES/](00-PROJECT-SUMMARIES/) for the index.
