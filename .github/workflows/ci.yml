@@ -124,6 +124,21 @@ jobs:
       - name: run scanners
         run: make scan
 
+  manifests:
+    name: Kubernetes manifests (no cluster)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Installs the same pinned kubectl/k3d the local track uses, which also
+      # keeps the installer itself under test. No cluster is created: this job
+      # only builds the Kustomize overlays and dry-runs them client-side.
+      - name: install pinned k8s tooling
+        run: |
+          bash scripts/k8s/tools.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: validate manifests
+        run: make k8s-validate
+
   integration:
     name: Integration (real deps)
     runs-on: ubuntu-latest

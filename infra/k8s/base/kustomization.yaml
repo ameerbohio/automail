@@ -1,0 +1,27 @@
+# Environment-independent base for the Automail stateless tier.
+# Layout and ownership: plans/16-kubernetes.md §3.
+#
+# Empty on purpose after Goal K1 -- K1 delivers the substrate (cluster, image
+# supply, validation gate), not workloads. The skeleton lands now so
+# `make k8s-validate` has something real to build and so each later goal adds
+# to a settled layout instead of inventing one:
+#
+#   K2  data/{postgres,redis,minio}-statefulset.yaml (+ services, PVCs)
+#   K3  cloud-server/{deployment,service,service-mtls,hpa,pdb}.yaml
+#   K4  portal/{deployment,service}.yaml, ingress/{ingressroutes,middlewares,tls}.yaml
+#
+# Secrets are deliberately absent from this tree and always will be: they are
+# created imperatively from infra/certs/ and .env by a Make target (K2), so no
+# PEM or password can ever reach a committed manifest.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# `labels`, not the deprecated `commonLabels`. includeSelectors stays false on
+# purpose: a Deployment's .spec.selector is immutable after creation, so a
+# label that leaks into selectors can only be changed by deleting the object.
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: automail
+    includeSelectors: false
+
+resources: []

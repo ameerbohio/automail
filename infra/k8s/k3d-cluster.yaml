@@ -1,0 +1,83 @@
+# k3d cluster definition for the Automail Kubernetes track (Goal K1).
+# Spec: plans/16-kubernetes.md §2. Applied by `make k8s-up`
+# (scripts/k8s/up.sh) -- never create the cluster with ad-hoc `k3d cluster
+# create` flags, or the host port mappings below are silently lost.
+#
+# WHY A CONFIG FILE AND NOT FLAGS: every host port a k3d cluster will ever
+# publish is fixed at *creation* time. k3d wires the mappings into the
+# loadbalancer/node containers, and Docker cannot add a published port to a
+# running container -- retrofitting one means destroying and recreating the
+# cluster (and losing every PVC with it). So all three mappings the later
+# goals need are declared here up front, before anything depends on them.
+#
+# 1 server + 3 agents (four nodes) is deliberate: pod anti-affinity, `kubectl
+# drain`, and "which node did that replica land on" are only demonstrable with
+# more than one schedulable node. See plans/16-kubernetes.md §8 for the honest
+# caveat -- four nodes here are four containers sharing one kernel.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: automail
+
+servers: 1
+agents: 3
+
+# Pinned, never `:latest` or a floating minor.
+#   * k3s v1.33 is what this host was proven on -- Kubernetes put cgroup v1 in
+#     maintenance mode in 1.31, and this WSL2 kernel is cgroup v1 (hybrid), so
+#     the newest k3s is the wrong bet here. See docs/k8s-host-setup.md.
+#   * The bundled Traefik version is a function of this tag, and K4 ports the
+#     Compose Traefik config onto those CRDs. Floating the tag would silently
+#     move the ingress dialect underneath K4.
+# Keep in sync with K3S_IMAGE in scripts/k8s/versions.env -- scripts/k8s/up.sh
+# fails the run if the two disagree.
+image: rancher/k3s:v1.33.13-k3s2
+
+# Pin the API-server host port too; k3d otherwise picks a random free one and
+# the kubeconfig changes on every recreate.
+kubeAPI:
+  hostIP: "127.0.0.1"
+  hostPort: "6445"
+
+ports:
+  # --- Edge (K4: Traefik IngressRoute) ---------------------------------------
+  # Windows holds 80/443 on this host, so the edge cannot use the defaults; and
+  # the Compose stack already owns 8080/8443 (scripts/deploy/smoke.sh). Using a
+  # third pair means the cluster and the Compose stack can run side by side,
+  # which Process Rule 3 (the Compose path keeps working) effectively requires.
+  # Non-443 cascades into CSP / CORS / MinIO presign -- plans/16-kubernetes.md
+  # §8.1 -- and K4 owns resolving that.
+  - port: 9080:80
+    nodeFilters:
+      - loadbalancer
+  - port: 9443:443
+    nodeFilters:
+      - loadbalancer
+  # --- Internal mTLS, printer dial-in (K5) -----------------------------------
+  # The printer lives outside the cluster and dials in. Its client verifies the
+  # cloud-server cert against the SANs `DNS:cloud-server, DNS:localhost`
+  # (infra/certs/gen.sh), and services/printer/mtls.go sets no ServerName -- so
+  # the dial host must be `localhost`. Publishing the NodePort on 127.0.0.1
+  # keeps the existing PKI untouched (option (a) of §6.1) instead of
+  # regenerating certs every Compose consumer holds.
+  # Host 9843 -> nodePort 30843 on the server node; kube-proxy fans it out to
+  # cloud-server pods on any node.
+  - port: 127.0.0.1:9843:30843
+    nodeFilters:
+      - server:0
+
+options:
+  k3d:
+    wait: true
+    timeout: "300s"
+  k3s:
+    # No extraArgs: the k3s defaults this track depends on are all wanted --
+    # bundled Traefik (K4 ingress), servicelb/klipper (how the loadbalancer
+    # container reaches Traefik), local-path storage (K2 data-tier PVCs) and
+    # metrics-server (K7's HPA has no input without it).
+    extraArgs: []
+  kubeconfig:
+    # Merge into ~/.kube/config and switch to it, so `kubectl` needs no
+    # per-command --kubeconfig. `make k8s-down` removes the entry again.
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true

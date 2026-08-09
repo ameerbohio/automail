@@ -1,0 +1,25 @@
+# Local k3d overlay -- the environment infra/k8s/k3d-cluster.yaml creates.
+# Spec: plans/16-kubernetes.md §3.
+#
+# What this overlay is for (filled in by K2-K4): NodePorts instead of cloud
+# load balancers, 1Gi PVCs, the printer left outside the cluster in DEV_MODE,
+# and the non-443 edge ports this host is forced onto (§8.1). A future
+# overlays/proxmox/ carries the same base with real hostnames and sizes --
+# base+overlay is the whole point, so environment drift is a diff rather than
+# a fork.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: automail
+
+resources:
+  - ../../base
+
+# Image tags are pinned here rather than in the base so the proxmox overlay can
+# point at a registry without touching shared files. Never :latest -- see
+# scripts/k8s/images.sh.
+images:
+  - name: automail/cloud-server
+    newTag: dev
+  - name: automail/portal
+    newTag: dev

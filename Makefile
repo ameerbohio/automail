@@ -143,8 +143,28 @@ load-selftest: ## Prove the load baseline detector catches a regression (no Dock
 		echo "✗ detector did NOT flag the regression"; exit 1; \
 	else echo "✔ regression correctly detected (non-zero exit)"; fi
 
+.PHONY: k8s-tools
+k8s-tools: ## Install the pinned k3d + kubectl into ~/.local/bin (no sudo) — Goal K1
+	@bash scripts/k8s/tools.sh
+
+.PHONY: k8s-up
+k8s-up: ## Create the local k3d cluster (1 server + 3 agents) — needs Docker (Goal K1)
+	@bash scripts/k8s/up.sh
+
+.PHONY: k8s-images
+k8s-images: ## Build both service images and import them into the cluster (no registry) — Goal K1
+	@bash scripts/k8s/images.sh
+
+.PHONY: k8s-down
+k8s-down: ## Delete the k3d cluster and verify no containers/networks/volumes leak — Goal K1
+	@bash scripts/k8s/down.sh
+
+.PHONY: k8s-validate
+k8s-validate: ## Manifest + pin validation, no cluster and no Docker needed (Goal K1)
+	@bash scripts/k8s/validate.sh
+
 .PHONY: ci
-ci: fmt-check lint test-race cover cover-portal ## Docker-independent local CI gate
+ci: fmt-check lint test-race cover cover-portal k8s-validate ## Docker-independent local CI gate
 	@echo "✔ CI gates passed"
 
 .PHONY: hooks

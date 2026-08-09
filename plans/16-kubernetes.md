@@ -76,12 +76,12 @@ track dead.
 
 | Check | Measured | Consequence |
 |---|---|---|
-| `command -v k3d` / `kubectl` | **both absent** | Neither is installed. K1 installs them (pinned versions) or the track cannot start. |
+| `command -v k3d` / `kubectl` | **both absent** | Neither is installed. K1 installs them (pinned versions) or the track cannot start. **Settled by K1**: `k3d v5.9.0` + `kubectl v1.33.13`, checksum-verified into `~/.local/bin` by `scripts/k8s/tools.sh` (no sudo — this host has no passwordless sudo). |
 | `docker version` | Engine 29.6.1 | Fine — k3d needs a working Docker daemon and this is the same one every Compose target uses. |
-| `stat -fc %T /sys/fs/cgroup` | **`tmpfs`** → **cgroup v1** | **Blocking risk.** k3s's kubelet expects the cgroup v2 unified hierarchy; on a cgroup-v1 WSL2 kernel node registration commonly fails. The fix is host-level — `[boot] systemd=true` / cgroup v2 in `/etc/wsl.conf` plus `wsl --shutdown` — i.e. an **owner action**, the same class as installing Docker was. K1 must verify a cluster actually reaches `Ready` and is allowed to stop as `blocked-on-owner` if it does not. |
+| `stat -fc %T /sys/fs/cgroup` | **`tmpfs`** → **cgroup v1** | **Was the blocking risk; measured clear by K1 (2026-08-08).** k3s **v1.33.13-k3s2** registered all 4 nodes `Ready` on this cgroup-v1 (hybrid) kernel, with CoreDNS, metrics-server, local-path-provisioner, Traefik and klipper-lb all `Running`. The `/etc/wsl.conf` + `wsl --shutdown` owner action was **not** needed. This is version-bound, not settled forever: Kubernetes has had cgroup v1 in maintenance mode since 1.31, which is precisely why the k3s pin is 1.33 and not the newest minor. Re-verify before raising it. |
 | `nproc` / `free` | 24 cores, 15 GiB total (~10 GiB free) | Four k3s nodes plus the data tier plus 3+2 app pods fit, but not comfortably. Pod `requests` must be budgeted against ~10 GiB, and `maxReplicas: 8` (§7) must still be schedulable or the HPA demo ends in `Pending` pods. |
 | `/var/lib/docker` free | 898 GiB | Image imports are not a constraint. |
-| ports 80/443 on the host | **held by Windows** (already documented in `.env.example` / `docker-compose.yml`) | The k3d loadbalancer must publish alternate host ports — which cascades into the CSP/CORS/presign chain, see §8.1. |
+| ports 80/443 on the host | **held by Windows** (already documented in `.env.example` / `docker-compose.yml`) | The k3d loadbalancer must publish alternate host ports — which cascades into the CSP/CORS/presign chain, see §8.1. **K1 chose 9080/9443** (not 8080/8443, which the Compose stack owns) so the cluster and the Compose stack can run simultaneously — Process Rule 3 in practice. Printer mTLS is `127.0.0.1:9843 → nodePort 30843`; API server `127.0.0.1:6445`. All four are fixed in `infra/k8s/k3d-cluster.yaml`. |
 | `/etc/hosts` | **no `*.automail.local` entries** | Every existing suite reaches the edge with `curl --resolve` or by bypassing Traefik entirely. A *browser* (§ the K4 acceptance) needs real hosts entries — another owner/sudo action. |
 
 Two more substrate facts that shape the manifests:
