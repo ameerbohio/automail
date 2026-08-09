@@ -1,0 +1,111 @@
+# Edge routing (Goal K4 / plans/16-kubernetes.md §3) — the Compose Traefik
+# labels, ported to IngressRoute CRDs. Three hostnames, three trust/exposure
+# stories:
+#
+#   automail.local       the portal (browser origin)
+#   api.automail.local   cloud-server's public HTTP API
+#   blob.automail.local  MinIO's S3 API, browser-facing because the guest PUTs
+#                        the ciphertext to a pre-signed URL directly
+#
+# The internal mTLS listener is deliberately NOT here. It is not an edge
+# concern: it terminates its own TLS with client-certificate verification and
+# is reached through the NodePort from Goal K3. Routing it through Traefik
+# would terminate that TLS at the wrong place and break the invariant.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: portal
+  labels:
+    app.kubernetes.io/name: portal
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints: [websecure]
+  routes:
+    # THE GUEST RATE LIMIT BELONGS ON THIS ORIGIN, NOT ON api. — a Goal T12
+    # finding that has to survive the port. The browser never contacts
+    # api.automail.local: services/portal/lib/api.ts calls same-origin /api/*,
+    # which Next proxies server-side. A limit on the API origin therefore sees
+    # only the portal pods' addresses and throttles nothing real.
+    #
+    # The longer rule outranks the catch-all below by Traefik's default
+    # priority (rule length), so no explicit priority is needed — same
+    # mechanism the Compose labels rely on.
+    - kind: Rule
+      match: Host(`automail.local`) && (PathPrefix(`/api/jobs`) || PathPrefix(`/api/recipients`))
+      services:
+        - name: portal
+          port: 3000
+      middlewares:
+        - name: secure-headers
+        - name: guest-ratelimit
+    - kind: Rule
+      match: Host(`automail.local`)
+      services:
+        - name: portal
+          port: 3000
+      middlewares:
+        - name: secure-headers
+  tls:
+    secretName: automail-edge-tls
+    options:
+      name: edge
+      namespace: automail
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: cloud-server
+  labels:
+    app.kubernetes.io/name: cloud-server
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints: [websecure]
+  routes:
+    # Kept for parity with Compose: direct API callers (curl, a future mobile
+    # client, the deploy smoke) are unauthenticated on these paths too. It is
+    # defence in depth rather than the effective control — see the portal route.
+    - kind: Rule
+      match: Host(`api.automail.local`) && (PathPrefix(`/jobs`) || PathPrefix(`/recipients`))
+      services:
+        - name: cloud-server
+          port: 8080
+      middlewares:
+        - name: secure-headers
+        - name: guest-ratelimit
+    - kind: Rule
+      match: Host(`api.automail.local`)
+      services:
+        - name: cloud-server
+          port: 8080
+      middlewares:
+        - name: secure-headers
+  tls:
+    secretName: automail-edge-tls
+    options:
+      name: edge
+      namespace: automail
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: minio
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints: [websecure]
+  routes:
+    # No secure-headers here, matching Compose: CSP and frame headers are
+    # meaningless on an S3 API response, and the pre-signed URL is the
+    # authorization. SigV4 signs the Host header and Traefik passes it through
+    # unchanged, so the signature still verifies at MinIO.
+    - kind: Rule
+      match: Host(`blob.automail.local`)
+      services:
+        - name: minio
+          port: 9000
+  tls:
+    secretName: automail-edge-tls
+    options:
+      name: edge
+      namespace: automail

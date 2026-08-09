@@ -36,15 +36,22 @@ configMapGenerator:
       # question: this host publishes the edge on 9443, and a non-default port
       # is part of the origin, so K4 must move this value and the CSP
       # `connect-src`, MINIO_PUBLIC_ENDPOINT and /etc/hosts together (§8.1).
-      - MINIO_CORS_ORIGIN=https://automail.local
+      #
+      # THE :9443 IS NOT COSMETIC. An HTTP origin includes the port, so with
+      # the edge on 9443 the browser's Origin header is
+      # `https://automail.local:9443` and MinIO would reject the preflight for
+      # the port-less value. This is one of the four coupled values in §8.1;
+      # all four carry :9443 in this overlay and none of them do in the base.
+      - MINIO_CORS_ORIGIN=https://automail.local:9443
       # The host cloud-server SIGNS into the pre-signed upload URL -- what the
       # browser is told to PUT to, not what the server itself talks to. It has
       # to resolve outside the cluster, so `minio:9000` is wrong here by
       # construction. Same four-way coupling as above: this, the CORS origin,
       # the CSP connect-src and /etc/hosts move together or uploads fail with
-      # no server-side error (§8.1). Unresolvable until K4 adds the ingress --
-      # which is why K3's acceptance stays inside the cluster.
-      - MINIO_PUBLIC_ENDPOINT=blob.automail.local
+      # no server-side error (§8.1). Carries the port for the same reason the
+      # CORS origin does: the URL cloud-server signs must be one the browser
+      # can actually reach, and SigV4 signs the Host header including the port.
+      - MINIO_PUBLIC_ENDPOINT=blob.automail.local:9443
       - MINIO_PUBLIC_SECURE=true
 
 patches:
@@ -95,3 +102,25 @@ patches:
       - op: add
         path: /spec/ports/0/nodePort
         value: 30843
+
+  # THE FOURTH COUPLED VALUE (§8.1): the CSP's connect-src.
+  #
+  # A CSP host-source without a port means the scheme's DEFAULT port, so
+  # `https://blob.automail.local` does NOT permit a fetch to
+  # `https://blob.automail.local:9443` — the browser blocks the guest's
+  # ciphertext PUT with a console violation and no server-side error anywhere.
+  # This is the single most confusing failure in the whole port cascade, which
+  # is why the acceptance for this goal includes "no CSP violations in the
+  # console" rather than only "the flow worked".
+  - target:
+      kind: Middleware
+      name: secure-headers
+    patch: |-
+      - op: replace
+        path: /spec/headers/contentSecurityPolicy
+        value: >-
+          default-src 'self';
+          script-src 'self' 'unsafe-inline';
+          style-src 'self' 'unsafe-inline';
+          img-src 'self' data:;
+          connect-src 'self' https://blob.automail.local:9443

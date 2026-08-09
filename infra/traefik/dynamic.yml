@@ -32,9 +32,10 @@ http:
         stsSeconds: 31536000
         stsIncludeSubdomains: true
         stsPreload: true
-        # plans/02-security.md §6 specifies `default-src 'self'`. Two directives
+        # plans/02-security.md §6 specifies `default-src 'self'`. Four directives
         # have to be added on top of it or the product does not function, and
-        # both failures are invisible to every suite that bypasses Traefik:
+        # every one of those failures is invisible to a suite that bypasses
+        # Traefik or drives it with curl (curl has no CSP):
         #
         #   connect-src -- the guest flow's ciphertext PUT goes from the portal
         #     origin straight to blob.automail.local (plans/09: the cloud server
@@ -48,6 +49,21 @@ http:
         #     event handler binds and no request is ever made. Verified in
         #     Chromium through the edge -- 5 violations, zero API calls.
         #
+        #   style-src -- React writes `style=` attributes (progress bars, status
+        #     colours) and with no style-src the default-src fallback blocks
+        #     every one: "Applying inline style violates ... The action has been
+        #     blocked". Found by the Goal K4 browser run through the Kubernetes
+        #     ingress and confirmed here: it affects this edge identically, and
+        #     nothing caught it because T7/T8 publish the portal's port directly
+        #     and `make deploy-smoke` drives the edge with curl, which has no
+        #     CSP. A blocked inline STYLE cannot execute code -- the risk is
+        #     CSS-level, materially smaller than the script-src exception above.
+        #     Keep in step with infra/k8s/base/ingress/middlewares.yaml.
+        #
+        #   img-src -- the page texture is an inline data:image/svg+xml
+        #     background, and `data:` is not covered by 'self', so default-src
+        #     blocked it. Same provenance as style-src above.
+        #
         # 'unsafe-inline' for scripts is a genuine weakening, taken knowingly.
         # The strict alternative is a per-request nonce emitted from Next
         # middleware, which means moving the portal's CSP out of Traefik and into
@@ -58,6 +74,8 @@ http:
         contentSecurityPolicy: >-
           default-src 'self';
           script-src 'self' 'unsafe-inline';
+          style-src 'self' 'unsafe-inline';
+          img-src 'self' data:;
           connect-src 'self' https://blob.automail.local
         frameDeny: true
         contentTypeNosniff: true

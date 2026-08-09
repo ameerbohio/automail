@@ -1,0 +1,89 @@
+# Traefik Middlewares — the Compose `dynamic.yml` middlewares, ported to CRDs
+# (Goal K4 / plans/16-kubernetes.md §3).
+#
+# API group is `traefik.io/v1alpha1`: that is Traefik v3. k3s v1.33.13-k3s2
+# bundles Traefik 3.7.8 (verified with `kubectl -n kube-system get deploy
+# traefik -o jsonpath='{...image}'`). Traefik v2 used `traefik.containo.us`,
+# so this file is version-bound to the k3s image tag pinned in
+# scripts/k8s/versions.env — another reason that tag must not float.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: secure-headers
+  labels:
+    app.kubernetes.io/component: ingress
+spec:
+  headers:
+    stsSeconds: 31536000
+    stsIncludeSubdomains: true
+    stsPreload: true
+    # plans/02-security.md §6 specifies `default-src 'self'`. Four additions are
+    # load-bearing, and every one of those failures is invisible to a suite
+    # that bypasses the edge or drives it with curl (curl has no CSP):
+    #
+    #   connect-src — the guest's ciphertext PUT goes from the portal origin
+    #     straight to the blob origin (the cloud server never sees the blob).
+    #     Under `default-src 'self'` the browser blocks that fetch.
+    #
+    #   script-src 'unsafe-inline' — the Next.js App Router streams its RSC
+    #     payload in inline <script> blocks. Without it the SSR HTML renders and
+    #     returns 200 but nothing hydrates: no handler binds, no request is made.
+    #
+    #   style-src 'unsafe-inline' — React writes `style=` attributes for the
+    #     progress bars and status colours, and with no style-src the
+    #     default-src fallback blocks every one of them ("Applying inline style
+    #     violates ... The action has been blocked"). Found by the Goal K4
+    #     browser run through the ingress; it affects the Compose edge
+    #     identically (same CSP), and no suite caught it because T7/T8 publish
+    #     the portal's port directly and the deploy smoke uses curl. A blocked
+    #     inline STYLE cannot execute code — the risk is CSS-level (overlay /
+    #     exfil-by-selector), materially smaller than the script-src exception
+    #     above, and the alternative is a visibly broken page on every real
+    #     deploy. Keep this in step with infra/traefik/dynamic.yml.
+    #
+    #   img-src 'self' data: — the portal's page texture is an inline
+    #     data:image/svg+xml background. `data:` is NOT covered by 'self', so
+    #     the default-src fallback blocks it. Same provenance as style-src:
+    #     found in a browser through the edge, invisible to curl.
+    #
+    # A CSP host-source carries a port, and omitting one means the scheme's
+    # DEFAULT port. This host cannot use 443 (Windows holds it), so the k3d
+    # overlay REPLACES this value with the :9443 form — see §8.1 and the patch
+    # in overlays/k3d-local. The value here is the standard-port one a real
+    # deploy uses.
+    contentSecurityPolicy: >-
+      default-src 'self';
+      script-src 'self' 'unsafe-inline';
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data:;
+      connect-src 'self' https://blob.automail.local
+    frameDeny: true
+    contentTypeNosniff: true
+    referrerPolicy: "no-referrer"
+---
+# plans/02-security.md §6: 20 req/min per IP on upload + job submission.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: guest-ratelimit
+  labels:
+    app.kubernetes.io/component: ingress
+spec:
+  rateLimit:
+    average: 20
+    period: 1m
+    # burst is NOT optional. Traefik defaults it to 1, which turns "20 per
+    # minute" into "one request every three seconds" — and one guest submission
+    # is four back-to-back calls (/recipients, its public-key, /jobs/upload-url,
+    # /jobs), so the flow 429s on its second request. The Compose stack learned
+    # this the hard way in the Goal T12 deploy smoke; carrying `burst: average`
+    # across is the regression guard.
+    burst: 20
+    # WHAT THIS KEYS ON, WHICH CHANGES BEHIND KUBERNETES: Traefik's default
+    # sourceCriterion is the client IP. In the cluster the request has already
+    # passed the k3d loadbalancer container and a Service with
+    # externalTrafficPolicy: Cluster, both of which can SNAT — so every request
+    # may present the same source address and the per-IP limit degrades into a
+    # global one. `make k8s-edge-check` measures which of the two it is and the
+    # Status Log records the answer; a passing throttle alone would NOT prove
+    # the per-IP property survived the port.

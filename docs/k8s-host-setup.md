@@ -98,6 +98,8 @@ make k8s-secrets    # namespace + Secrets from infra/certs, infra/traefik and .e
 make k8s-apply      # schema ConfigMap + overlay, wait for Ready  (~20 s)
 make k8s-data-check # schema applied, and data survives pod deletion
 make k8s-cloud-check # pod spread, Service fan-out, no consumer leak on rollout
+make k8s-edge-check  # ingress: 3 hostnames, sniStrict, CSP/presign ports, rate limit
+make k8s-edge-browser # Playwright guest flow through the ingress (needs the portal deps)
 make k8s-validate   # kustomize build + client dry-run — needs no cluster, no Docker
 make k8s-down       # delete, then prove no k3d container/network/volume survives
 ```
@@ -140,6 +142,36 @@ RESET_DATA=1 ALLOW_DESTRUCTIVE=1 make k8s-apply
 
 Both variables are required, the same double opt-in `scripts/deploy/smoke.sh`
 uses.
+
+### The edge, and the ports it drags along (Goal K4)
+
+The cluster's ingress is k3s's bundled Traefik (**3.7.8**, CRDs
+`traefik.io/v1alpha1`), configured by `IngressRoute` / `Middleware` /
+`TLSOption` objects that mirror `infra/traefik/dynamic.yml` line for line.
+Three hostnames are routed on `https://…:9443`: `automail.local` (portal),
+`api.automail.local` (cloud-server), `blob.automail.local` (MinIO).
+
+**The edge is on 9443, and a port is part of an origin.** Four committed values
+have to agree or the guest flow breaks with no server-side error — all four are
+in `infra/k8s/overlays/k3d-local/kustomization.yaml`:
+
+| Value | Why it needs the port |
+|---|---|
+| CSP `connect-src` | a host-source without a port means the scheme's *default* port, so the ciphertext PUT is blocked in the browser |
+| `MINIO_CORS_ORIGIN` | the browser's `Origin` header carries `:9443` |
+| `MINIO_PUBLIC_ENDPOINT` | cloud-server signs it into the presigned URL; SigV4 signs the Host header including the port |
+| name resolution | see below |
+
+**Name resolution is still an owner action.** `/etc/hosts` has no
+`*.automail.local` entries and adding them needs root. `make k8s-edge-check`
+sidesteps that with `curl --resolve`; the browser suite
+(`make k8s-edge-browser`) uses Chromium's `--host-resolver-rules`. Both really
+send the hostname and SNI — only the A-record lookup is short-circuited — so
+what remains unproven is the operator step of provisioning DNS, nothing else.
+
+**Known gap:** live status over SSE does not reach the browser through *any*
+Traefik edge, in this deployment or in Compose. See the owner-decision entry in
+`docs/study/00-interview-pending-questions.md`.
 
 ### There is no registry
 

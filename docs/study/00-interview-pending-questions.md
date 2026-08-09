@@ -212,6 +212,46 @@ Answer: _(to be filled in)_
 
 ---
 
+## OWNER DECISION — SSE does not survive the Traefik edge (found in Goal K4)
+
+**Q: guest tracking (`/track`, `GET /api/jobs/:id/stream`) renders live status
+when the browser talks to the portal directly, but renders nothing when any
+Traefik edge is in front of it — in *both* deploy targets. What is the fix, and
+whose layer is it?**
+
+Measured 2026-08-09 while landing the Kubernetes ingress:
+
+| Path | SSE renders in the browser |
+|---|---|
+| Compose, portal port published (`http://localhost:3000`) | ✅ (Goal T7 green) |
+| Compose, Traefik edge (`https://automail.local`) | ❌ |
+| k3d, Traefik edge (`https://automail.local:9443`) | ❌ |
+
+What is *not* the cause, each eliminated by experiment: the manifests
+(cloud-server's own SSE streams through the same k3d edge fine, headers and
+first `data:` frame and all); the middlewares (removing the rate limit changes
+nothing); the Service (pointing the portal at a cloud-server pod IP changes
+nothing); auth or routing (the EventSource request reaches cloud-server — a
+`job:<id>:status` Redis subscription stays live for the client's whole wait, so
+the initial snapshot event *is* being written). What stalls is the portal's
+Next.js pass-through relay (`new Response(upstream.body)`) once a reverse proxy
+sits in front of it.
+
+Nothing caught this before because **no test has ever watched SSE through
+Traefik**: T7/T8 publish the portal's port directly, and `make deploy-smoke`
+drives the edge with curl. It therefore affects a real Proxmox deploy today —
+guest tracking would sit on "connecting" forever — which is why it is an owner
+decision and not a quiet fix inside a manifest goal. Candidate directions:
+Traefik response buffering/`flushInterval` on that router; making the portal
+route pipe explicitly rather than handing Next a `ReadableStream`; or having the
+browser stream from `api.automail.local` directly (which needs a CSP
+`connect-src` change and a CORS story). Guard for whichever wins:
+`services/portal/e2e-k8s/ingress.spec.ts` carries a `test.fixme` naming exactly
+this.
+Answer: _(to be filled in)_
+
+---
+
 ## See also
 - [16-hybrid-encryption.md](16-hybrid-encryption.md) — answers the AES/RSA and passphrase-hygiene questions above
 - [.env.example](../../.env.example) — the unwired `REDIS_PASSWORD`

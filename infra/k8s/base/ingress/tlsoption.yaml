@@ -1,0 +1,25 @@
+# Edge TLS policy (Goal K4) — the port of `tls.options.default` from
+# infra/traefik/dynamic.yml.
+#
+# THIS IS A REGRESSION GUARD, not boilerplate. Commit c8716b1 fixed a
+# first-deploy blocker: `sniStrict: true` with no certificate for the routed
+# hostnames made a fresh stack fail in-browser with
+# ERR_SSL_UNRECOGNIZED_NAME_ALERT — the handshake is rejected before any HTTP
+# exists, so there is nothing in any log to point at. Dropping sniStrict in the
+# port to Kubernetes would silently re-enable that bug on the next environment.
+# The fix is never "disable sniStrict"; it is "have the cert", which
+# infra/certs/gen-edge-certs.sh generates and `make k8s-secrets` loads.
+#
+# Named `edge` rather than `default`: a TLSOption called `default` is only
+# Traefik's global default when it lives in the `default` namespace, and these
+# objects live in `automail`. Every IngressRoute therefore references this one
+# by name and namespace explicitly, which is clearer anyway.
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: edge
+  labels:
+    app.kubernetes.io/component: ingress
+spec:
+  minVersion: VersionTLS13
+  sniStrict: true

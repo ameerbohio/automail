@@ -12,9 +12,17 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-# Which compose files to resolve the running `postgres` service against. Defaults
-# to the Part 4b browser-E2E pair; the Part 5 full-system run (scripts/e2e/full.sh)
-# overrides it via E2E_COMPOSE_FILES so `exec postgres` targets the same project.
+# WHERE the `postgres` this seeds into lives. Two backends, one fixture:
+#
+#   compose (default)  docker compose exec, resolved against E2E_COMPOSE_FILES
+#                      -- the Part 4b browser-E2E pair unless overridden by the
+#                      Part 5 full-system run (scripts/e2e/full.sh).
+#   kubectl            kubectl exec into postgres-0 in the Kubernetes namespace
+#                      (Goal K4's browser acceptance through the ingress, and
+#                      Goal K5's k8s E2E). Same SQL, same fixture UUIDs, same
+#                      .env values -- the ONLY difference is how psql is
+#                      reached, which is the point: one seed, two deploy targets.
+SEED_BACKEND="${SEED_BACKEND:-compose}"
 if [ -n "${E2E_COMPOSE_FILES:-}" ]; then
   read -ra COMPOSE_FILES <<<"$E2E_COMPOSE_FILES"
 else
@@ -29,12 +37,29 @@ ADMIN_HASH='$2a$10$CU4/Y/byNgJLpmoJje0Kq.nl7MM1f0xBhvwUCpPPTaQIKblxXDITe'
 
 MAILBOX_ID="${DEV_MAILBOX_ID:-00000000-0000-0000-0000-000000000001}"
 
-echo "==> Seeding fixture data into Postgres"
-"${COMPOSE[@]}" exec -T \
-  -e PGPASSWORD="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)" \
-  postgres psql -v ON_ERROR_STOP=1 \
-  -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)" \
-  -d "$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)" \
+PGUSER_VAL="$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)"
+PGPASS_VAL="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
+PGDB_VAL="$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)"
+
+case "$SEED_BACKEND" in
+  compose)
+    EXEC=("${COMPOSE[@]}" exec -T -e PGPASSWORD="$PGPASS_VAL" postgres)
+    ;;
+  kubectl)
+    # `env PGPASSWORD=...` rather than a -e flag: kubectl exec has no env
+    # option, so the variable is set by the command itself inside the pod.
+    EXEC=(kubectl -n "${NAMESPACE:-automail}" exec -i "${SEED_POD:-postgres-0}" -- env PGPASSWORD="$PGPASS_VAL")
+    ;;
+  *)
+    echo "✗ unknown SEED_BACKEND '$SEED_BACKEND' (expected: compose | kubectl)" >&2
+    exit 1
+    ;;
+esac
+
+echo "==> Seeding fixture data into Postgres (backend: $SEED_BACKEND)"
+"${EXEC[@]}" psql -v ON_ERROR_STOP=1 \
+  -U "$PGUSER_VAL" \
+  -d "$PGDB_VAL" \
   -v app_key="$APP_KEY" -v pubkey="$PUBKEY" -v admin_hash="$ADMIN_HASH" \
   -v mailbox_id="$MAILBOX_ID" <<'SQL'
 INSERT INTO buildings (id, address)

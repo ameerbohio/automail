@@ -1,0 +1,31 @@
+# Cluster-wide default TLS options for the bundled Traefik (Goal K4).
+#
+# WHY THIS IS NOT IN THE KUSTOMIZE OVERLAY: it is not an Automail object. In
+# Traefik's Kubernetes provider the *global* default TLS options are, by
+# convention, a TLSOption named `default` in the `default` namespace — one
+# object per cluster, governing every router that does not name its own
+# options, including ones this project does not own. The overlay stamps
+# `namespace: automail` on everything it manages, which is exactly right for
+# app resources and exactly wrong for this. So it is applied separately by
+# scripts/k8s/apply.sh, and living in its own directory says so.
+#
+# WHAT IT GUARDS. Without it, a TLS handshake whose SNI matches no router falls
+# back to Traefik's built-in defaults, where sniStrict is false: Traefik answers
+# with the default certificate and only then 404s. The Compose stack refuses
+# that handshake outright (infra/traefik/dynamic.yml sets `tls.options.default`
+# with sniStrict), so omitting this would make the Kubernetes edge quietly
+# laxer than the Compose one — a drift between deploy targets in the direction
+# of less strict, which is the direction that matters.
+#
+# The paired half of commit c8716b1 is the certificate itself: sniStrict with
+# no cert for the routed names is the ERR_SSL_UNRECOGNIZED_NAME_ALERT
+# first-deploy bug. The fix is never to turn this off; it is to have the cert
+# (infra/certs/gen-edge-certs.sh, loaded by `make k8s-secrets`).
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: default
+  namespace: default
+spec:
+  minVersion: VersionTLS13
+  sniStrict: true

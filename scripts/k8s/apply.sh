@@ -72,6 +72,18 @@ kubectl -n "$NAMESPACE" create configmap "$SCHEMA_CONFIGMAP" \
 	kubectl apply -f - >/dev/null
 echo "✔ configmap/$SCHEMA_CONFIGMAP from $SCHEMA_FILE ($(wc -c <"$SCHEMA_FILE") bytes)"
 
+# --- cluster-scoped policy, applied outside the overlay --------------------
+# The default TLSOption governs every Traefik router in the cluster, not just
+# Automail's, so it lives outside the namespaced overlay (see the file's
+# header). Applied only when the CRD exists, so a cluster without Traefik --
+# or a dry-run of the app manifests alone -- is not blocked by it.
+if kubectl get crd tlsoptions.traefik.io >/dev/null 2>&1; then
+	kubectl apply -f infra/k8s/cluster/default-tlsoption.yaml >/dev/null
+	echo "✔ cluster default TLSOption (sniStrict) applied"
+else
+	echo "⚠ traefik CRDs absent — skipping the cluster default TLSOption"
+fi
+
 # --- the manifests ---------------------------------------------------------
 kubectl apply -k "$OVERLAY"
 

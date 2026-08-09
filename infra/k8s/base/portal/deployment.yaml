@@ -1,0 +1,106 @@
+# portal — Deployment, 2 replicas (Goal K4 / plans/16-kubernetes.md §3).
+#
+# The Next.js standalone server. Stateless in the same sense cloud-server is:
+# it holds no session state (the refresh token is an HttpOnly cookie the
+# browser carries) and its API routes are thin server-side proxies to
+# cloud-server. So two replicas is availability, not sharding.
+#
+# What matters for the security story: the plaintext PDF and the raw AES key
+# never reach this process. The browser encrypts with Web Crypto and PUTs the
+# ciphertext straight to MinIO's pre-signed URL (docs/study/18). These pods
+# proxy metadata.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portal
+  labels:
+    app.kubernetes.io/name: portal
+    app.kubernetes.io/component: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: portal
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: portal
+        app.kubernetes.io/component: web
+    spec:
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: portal
+      containers:
+        - name: portal
+          image: automail/portal:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          lifecycle:
+            preStop:
+              # Same Endpoints-propagation race as cloud-server: stop receiving
+              # new requests before the process goes away. Next.js has no drain
+              # sequence of its own, so this sleep IS the drain -- in-flight
+              # SSR/proxy requests finish inside it.
+              exec:
+                command: ["sleep", "5"]
+          env:
+            # Server-side only. The browser never talks to this URL: every
+            # browser call is same-origin /api/*, which Next proxies here.
+            # That is also why the guest rate limit has to sit on the portal
+            # origin rather than on api.automail.local -- see the IngressRoute.
+            - name: CLOUD_API_URL
+              value: http://cloud-server:8080
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3000"
+            # Next's standalone server binds 127.0.0.1 unless told otherwise,
+            # which would make the pod unreachable from the Service.
+            - name: HOSTNAME
+              value: 0.0.0.0
+          # `maxUnavailable: 0` is a lie without a readiness probe: Kubernetes
+          # would treat the pod as available the moment the container starts,
+          # which is before Next.js is listening, so a rollout would drop
+          # requests anyway (§4.4). /api/healthz exists for exactly this and
+          # touches no dependency -- the cloud API has its own probe.
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Node's baseline RSS is the floor here, not the traffic: an idle
+          # Next standalone server sits around 80-100 MiB. 2 × 128Mi requested
+          # against a host with ~10 GiB free, alongside 3 cloud-server pods and
+          # the data tier.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
