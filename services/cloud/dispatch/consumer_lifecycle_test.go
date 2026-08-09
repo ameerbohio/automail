@@ -24,9 +24,7 @@ import (
 // jobs:pending group already created.
 func newTestDispatcher(t *testing.T, nodeID string) (*Dispatcher, *miniredis.Miniredis, *redis.Client) {
 	t.Helper()
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { rdb.Close() })
+	mr, rdb := newFakeRedis(t)
 
 	di := &Dispatcher{Deps: Deps{Redis: rdb}, NodeID: nodeID, SweepInt: time.Hour}
 	if err := di.EnsureGroup(context.Background()); err != nil {

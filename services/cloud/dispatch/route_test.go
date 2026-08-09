@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
@@ -16,9 +15,7 @@ import (
 // writes on register/state frames. No Postgres needed -- eligible() only
 // reads mailbox:<id>:state.
 func TestEligible(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	defer rdb.Close()
+	_, rdb := newFakeRedis(t)
 	ctx := context.Background()
 
 	const mailboxID = "mailbox-1"
@@ -116,9 +113,7 @@ func TestJobRefFromValues_MissingField(t *testing.T) {
 // call would nil-panic, so reaching the assertions below is itself proof
 // the claim path was skipped).
 func TestTryDispatch_NotEligibleEnqueues(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	defer rdb.Close()
+	_, rdb := newFakeRedis(t)
 	ctx := context.Background()
 
 	ref := JobRef{

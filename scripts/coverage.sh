@@ -32,9 +32,27 @@ for m in cloud printer; do
 	prof="$ROOT/services/$m/coverage.out"
 	echo "── $m ────────────────────────────────────────────"
 	# shellcheck disable=SC2086  # $pkgs is an intentional word list
-	out=$( cd "$ROOT/services/$m" && go test $pkgs -covermode=atomic -coverprofile="$prof" 2>&1 )
+	status=0
+	out=$( cd "$ROOT/services/$m" && go test $pkgs -covermode=atomic -coverprofile="$prof" 2>&1 ) || status=$?
+	if [ "$status" -ne 0 ]; then
+		# Print the whole run, not the usual filtered summary. `out=$(...)` under
+		# `set -e` used to abort the script here with the output still trapped in
+		# $out, so a red CI job showed the module header and nothing else -- no
+		# failing test name, no panic, nothing to act on.
+		echo "$out" | sed 's/^/  /'
+		echo "  ✗ $m: go test failed (exit $status) — coverage not measured"
+		fail=1
+		continue
+	fi
 	echo "$out" | grep -E 'coverage:|FAIL|panic' | sed 's/^/  /' || true
-	total=$( cd "$ROOT/services/$m" && go tool cover -func="$prof" | awk '/^total:/{gsub("%","",$3); print $3}')
+	# stderr deliberately not captured: `go tool cover` failing should say so in
+	# the job log rather than disappear into awk.
+	total=$( cd "$ROOT/services/$m" && go tool cover -func="$prof" | awk '/^total:/{gsub("%","",$3); print $3}') || total=""
+	if [ -z "$total" ]; then
+		echo "  ✗ $m: no total line in $prof — coverage could not be measured"
+		fail=1
+		continue
+	fi
 	floor=${COVER_FLOOR_OVERRIDE:-$(floor_for "$m")}
 	if awk -v c="$total" -v f="$floor" 'BEGIN{ exit !(c+0 >= f+0) }'; then
 		echo "  ✔ $m coverage ${total}% ≥ floor ${floor}%"

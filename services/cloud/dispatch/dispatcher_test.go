@@ -7,7 +7,6 @@ import (
 
 	"automail/cloud/store"
 
-	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -29,9 +28,7 @@ import (
 // package's existing no-Postgres-fixture test depth (see
 // link/hub_integration_test.go).
 func TestDispatcher_BlockedRetryStaysPendingWithoutDuplicating(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	defer rdb.Close()
+	_, rdb := newFakeRedis(t)
 	ctx := context.Background()
 
 	deps := Deps{Redis: rdb}
@@ -56,16 +53,26 @@ func TestDispatcher_BlockedRetryStaysPendingWithoutDuplicating(t *testing.T) {
 	defer cancel()
 	go di.Run(runCtx)
 
-	// Give Run's PSUBSCRIBE a moment to attach before publishing --
-	// otherwise the event could fire before anyone's listening.
-	time.Sleep(100 * time.Millisecond)
-
-	receivers, err := rdb.Publish(ctx, store.ChanAvailable(mailboxID), "1").Result()
-	if err != nil {
-		t.Fatalf("publish available: %v", err)
-	}
-	if receivers == 0 {
-		t.Fatal("expected the dispatcher to be PSUBSCRIBEd to mailbox:*:available")
+	// Publish until Redis reports a subscriber: the event has to land *after*
+	// Run's PSUBSCRIBE has attached, or nothing is listening when it fires.
+	// Retrying rather than sleeping a fixed 100ms keeps the assertion ("the
+	// dispatcher really is subscribed to mailbox:*:available") while removing
+	// the guess about how long a loaded CI runner takes to schedule the
+	// goroutine. Re-publishing is harmless -- the event carries no payload the
+	// dispatcher reads, it only wakes drain.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		receivers, err := rdb.Publish(ctx, store.ChanAvailable(mailboxID), "1").Result()
+		if err != nil {
+			t.Fatalf("publish available: %v", err)
+		}
+		if receivers > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected the dispatcher to be PSUBSCRIBEd to mailbox:*:available")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Give the goroutine time to process the available event via drain.
@@ -107,9 +114,7 @@ func TestDispatcher_BlockedRetryStaysPendingWithoutDuplicating(t *testing.T) {
 // it) would pin the dispatcher goroutine inside drain and starve the
 // available-event and XAUTOCLAIM sweep cases forever.
 func TestDispatcher_DrainReturnsOnEmptyStream(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	defer rdb.Close()
+	_, rdb := newFakeRedis(t)
 	ctx := context.Background()
 
 	di := &Dispatcher{Deps: Deps{Redis: rdb}, NodeID: "test-node"}
@@ -133,9 +138,7 @@ func TestDispatcher_DrainReturnsOnEmptyStream(t *testing.T) {
 // twice (every node does this on startup, and a node can restart) doesn't
 // error on the second call -- BUSYGROUP is the expected, swallowed case.
 func TestDispatcher_EnsureGroupIdempotent(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	defer rdb.Close()
+	_, rdb := newFakeRedis(t)
 	ctx := context.Background()
 
 	di := &Dispatcher{Deps: Deps{Redis: rdb}, NodeID: "test-node"}
