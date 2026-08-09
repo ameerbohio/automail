@@ -5,50 +5,175 @@
 > claim linked to the code or the measured run behind it. That folder is the fastest way to judge
 > this project.
 
-**An end-to-end-encrypted automated mail system.** A sender uploads a PDF; it is encrypted **in the
-browser** before it leaves; a cloud server routes ciphertext it has no ability to decrypt; and a
-printer inside a physical mailbox unit unwraps the key in RAM, prints the document, and wipes it
-before reporting delivery.
+**Automail delivers real mail — the kind that comes out on paper — and nobody along the way can
+read it.**
 
-The interesting constraint is the one the whole design is built around: **the server operator
-cannot read the mail.** Not "does not" — *cannot*. A full database dump plus every object in blob
-storage yields ciphertext and metadata.
+You open a web page, pick who you're writing to, choose a PDF and hit send. A printer sitting
+inside that person's mailbox prints it, and the page is waiting for them when they open the box.
+Your document is scrambled in your browser before it ever leaves your computer, and it is only
+unscrambled inside the mailbox itself.
+
+That is the constraint the whole system is built around: **the operator cannot read the mail.** Not
+"does not" — *cannot*. Steal the entire database and every stored file and you get scrambled bytes
+plus metadata — which mailbox, when, how big — and no way to turn any of it back into a document.
+
+## The pieces
 
 ```mermaid
-flowchart LR
-    B["Browser<br/>AES-256-GCM + RSA-OAEP"]
-    C["Cloud server (Go)<br/>N stateless nodes<br/><b>zero-knowledge</b>"]
-    S3[("Object storage<br/>ciphertext only")]
-    PG[("PostgreSQL<br/>job rows + audit log")]
-    P["Printer in the<br/>mailbox unit"]
-    PR["📄 paper"]
+flowchart TB
+    B["<b>Sender's browser</b><br/>🔓 the document is readable here"]
+    C["<b>Cloud server</b><br/>🔒 wrapped key and metadata only"]
+    S[("<b>Storage and database</b><br/>🔒 scrambled bytes and metadata only")]
+    M["<b>Mailbox unit</b><br/>🔓 readable again — in RAM, never on disk"]
+    P(["📄 <b>Paper</b>"])
 
-    subgraph R ["Redis"]
-        direction TB
-        PS(["<b>mailbox:{id}:dispatch</b><br/>pub/sub"])
-        ST(["<b>jobs:pending</b><br/>Stream + consumer group"])
-    end
-
-    B -->|"ciphertext (pre-signed PUT)"| S3
-    B -->|"wrapped key + metadata"| C
-    C -->|"claim the row first:<br/>SELECT ... FOR UPDATE NOWAIT<br/><b>the double-dispatch guard</b>"| PG
-    C -->|"publish the job"| PS
-    PS -->|"reaches whichever node<br/>holds that printer's socket"| C
-    C -->|"printer busy or offline:<br/>XADD and retry later"| ST
-    ST -->|"XREADGROUP — <b>at-least-once</b>,<br/>re-attempted when a printer frees up"| C
-    C <-->|"mTLS WebSocket<br/>(printer dials out)"| P
-    S3 -.->|"pre-signed GET"| P
-    P -->|"decrypt in RAM → print → wipe"| PR
+    B -->|"the scrambled document"| S
+    B -->|"the key, itself locked"| C
+    C -->|"still locked"| M
+    S -->|"still scrambled"| M
+    M --> P
 ```
 
-Two mechanisms, deliberately not one. The Redis Stream's consumer group decides **which node**
-picks up a queued job and guarantees the entry survives a node dying mid-attempt — that is
-at-least-once delivery, not exactly-once processing. The guarantee that a job is never dispatched
-twice is the Postgres row lock, which also covers the immediate path that never touches the queue.
+🔓 means the document exists in readable form there. 🔒 means it does not, and nothing stored at
+that step can make it readable. Only the two ends are unlocked — and the mailbox end is the only
+thing in the world holding the key that opens it.
 
-It is a personal/portfolio project, built to production discipline: written specs before code,
+<details>
+<summary><b>Sender's browser</b> — where the encryption actually happens</summary>
+
+A Next.js/TypeScript portal. The PDF is encrypted with **AES-256-GCM** using the browser's own Web
+Crypto, and that one-use key is then wrapped to the destination mailbox's **RSA-4096** public key
+(OAEP). The scrambled file goes **straight to object storage** on a pre-signed URL — it never passes
+through the application server at all. → [`services/portal/`](services/portal/),
+[browser E2EE](docs/study/18-web-crypto-e2ee-portal.md),
+[hybrid encryption](docs/study/16-hybrid-encryption.md)
+</details>
+
+<details>
+<summary><b>Cloud server</b> — the part that is deliberately kept ignorant</summary>
+
+Go, running as N interchangeable nodes behind a load balancer. It stores the wrapped key **verbatim**
+and forwards it to exactly one place: the mailbox that can open it. It never holds the private key,
+never streams the document's bytes, and never logs the wrapped key. Those aren't promises in a
+comment — an AST scanner walks the whole tree in CI on every push and **fails the build** if any of
+them is violated, with a sibling test that plants a violation to prove the scanner still works. →
+[`services/cloud/`](services/cloud/), [security summary](00-PROJECT-SUMMARIES/security.md)
+</details>
+
+<details>
+<summary><b>Storage and database</b> — what a full breach would actually yield</summary>
+
+MinIO (S3-compatible) holds the scrambled documents; PostgreSQL holds job rows and an
+append-only audit log that a database trigger refuses to let anyone `UPDATE` or `DELETE`. Personal
+details are themselves encrypted in the columns with pgcrypto. → [audit
+immutability](docs/study/06-postgres-audit-immutability.md), [PII
+encryption](docs/study/07-pgcrypto-pii-encryption.md)
+</details>
+
+<details>
+<summary><b>Mailbox unit</b> — the only place plaintext ever exists</summary>
+
+A Go service inside the physical unit, holding the private key. It unwraps the document key **in
+RAM**, decrypts into `/dev/shm` (tmpfs — a filesystem that only ever lives in memory), prints via
+CUPS/IPP, and **unlinks the file before** it reports the job delivered, then zeroes the buffers. It
+also dials *out* to the cloud over a mutually-authenticated WebSocket, so a mailbox never needs an
+inbound hole in anyone's firewall. → [`services/printer/`](services/printer/), [dispatch
+fan-in](docs/study/11-dispatch-fan-in-printer-link.md)
+</details>
+
+<details>
+<summary><b>Paper</b> — yes, really</summary>
+
+A Canon imageCLASS MF240 over driverless IPP-over-USB. Phase 10 is closed against physical paper,
+not a simulator, and `/dev/shm` was checked clean afterwards on the real hardware. → [status
+log](GOALS.md), [CUPS host setup](docs/cups-host-setup.md)
+</details>
+
+## What happens when you send one
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant C as Cloud server
+    participant Q as Redis
+    participant S as Storage
+    participant M as Mailbox unit
+
+    B->>B: encrypt the PDF, wrap the key<br/>to the mailbox's public key
+    B->>S: upload the scrambled file (pre-signed PUT)
+    B->>C: hand over the wrapped key and metadata
+    C->>C: is that mailbox idle, with room in the slot?
+
+    alt busy, or unplugged
+        C->>Q: queue it (Stream jobs:pending)
+        Note over C,Q: re-attempted when the mailbox<br/>reports itself free again
+    else ready
+        C->>C: claim the job in Postgres<br/>SELECT ... FOR UPDATE NOWAIT
+        C->>M: dispatch, down the socket the mailbox dialed out
+        M->>S: fetch the scrambled file (pre-signed GET)
+        M->>M: unwrap the key in RAM, decrypt to tmpfs,<br/>print, unlink, zero
+        M->>C: delivered
+        C->>B: live status, as it happens
+    end
+```
+
+**Two mechanisms guard the queued path, deliberately not one.** The Redis Stream's consumer group decides
+*which node* picks up a queued job and keeps the entry alive if that node dies mid-attempt — that is
+*at-least-once* delivery, not exactly-once. What guarantees a job is never printed twice is the
+Postgres row lock, which also covers the straight-through path that never touches the queue at all.
+
+## Questions you're probably about to ask
+
+<details>
+<summary>So the operator <i>could</i> read it, if they really wanted to?</summary>
+
+No — and that is a design property, not a policy. The private key that opens a document exists only
+inside the mailbox unit. The server has never had it and has nowhere to get it. The honest limit of
+the claim: the operator does learn **metadata** — which sender wrote to which mailbox, when, and how
+large the file was. Traffic analysis is not defended against, and the summary
+[says so](00-PROJECT-SUMMARIES/security.md) rather than glossing it.
+</details>
+
+<details>
+<summary>What happens if the mailbox is unplugged when I hit send?</summary>
+
+The job is queued rather than lost or bounced, and re-attempted the moment that mailbox reports
+itself free again — see the "busy, or unplugged" branch above. If the cloud node handling it dies
+mid-attempt, the queue entry survives and another node reclaims it, but only once it is *provably*
+abandoned. → [Redis Streams and consumer
+groups](docs/study/14-redis-streams-consumer-groups.md)
+</details>
+
+<details>
+<summary>How do I know the security claims are true and not just prose?</summary>
+
+Because most of them are tests that **fail the build**, not sentences. `TestInvariant_ZeroKnowledgeCloud`
+walks the source for any decryption call or logged key; `TestInvariant_PlaintextWritesTargetTmpfsOnly`
+pins plaintext to memory-backed storage; a certless client is *refused* by the internal listener.
+And because the encrypting code is TypeScript while the decrypting code is Go, a committed contract
+test makes the browser emit a real vector and the Go printer decrypt it byte-for-byte — plus a
+one-bit-flip case that must be rejected outright. → [testing
+summary](00-PROJECT-SUMMARIES/testing.md)
+</details>
+
+<details>
+<summary>Why does a mailbox need Kubernetes?</summary>
+
+The mailbox doesn't. The cloud tier does, and that tier is the interesting distributed-systems
+problem: N interchangeable nodes, a printer socket pinned to exactly one of them, rolling updates
+that must not drop a request or sever a live status stream. It runs on a 4-node cluster with the
+numbers written down by the run that produced them. → [Kubernetes
+summary](00-PROJECT-SUMMARIES/kubernetes.md), [measured results](infra/k8s/RESULTS.md)
+</details>
+
+<details>
+<summary>Is this a product?</summary>
+
+No — a personal/portfolio project, built to production discipline: written specs before code,
 per-phase acceptance criteria, security invariants enforced as build-failing tests, and every
-performance number traceable to a committed run.
+performance number traceable to a committed run on a named machine.
+</details>
 
 ---
 
@@ -103,9 +228,10 @@ Full first-deploy walkthrough: [docs/deploy-checklist.md](docs/deploy-checklist.
 | [`services/cloud/`](services/cloud/) | Go cloud server: API, dispatch, printer-link hub, auth |
 | [`services/printer/`](services/printer/) | Go printer microservice — the only place plaintext ever exists |
 | [`services/portal/`](services/portal/) | Next.js sender portal (browser-side encryption) |
+| [`docker-compose.yml`](docker-compose.yml) | The deployment. `docker compose up -d --build` needs no arguments |
+| [`infra/compose/`](infra/compose/) | Overlays on top of it — demo, test profiles, load harness. [What each one is for](infra/compose/README.md) |
 | [`infra/k8s/`](infra/k8s/) | Kubernetes manifests + [measured results](infra/k8s/RESULTS.md) |
-| [`docs/study/`](docs/study/) | 28 deep explainers — the *why* behind each decision |
-| [`00-PROJECT-SUMMARIES/`](00-PROJECT-SUMMARIES/) | The one-page summaries linked above |
+| [`docs/study/`](docs/study/) | 31 deep explainers — the *why* behind each decision |
 
 ## An honest note on the numbers
 

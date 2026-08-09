@@ -5,7 +5,7 @@
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.demo.yml)
+COMPOSE=(docker compose -f docker-compose.yml -f infra/compose/demo.yml)
 
 echo "==> Stopping the stack and tunnel (removing volumes)"
 "${COMPOSE[@]}" down -v --remove-orphans 2>&1 | tail -3

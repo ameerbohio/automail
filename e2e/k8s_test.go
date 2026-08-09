@@ -8,7 +8,7 @@
 // What is different here, and why it is worth a separate suite from T8/T12:
 //
 //   - THE PRINTER IS OUTSIDE. It is a plain container on the host in its own
-//     Compose project (docker-compose.k8s-printer.yml), dialing *out* to the
+//     Compose project (infra/compose/k8s-printer.yml), dialing *out* to the
 //     mTLS NodePort on wss://localhost:9843. That is the real architecture --
 //     software inside a physical mailbox unit behind NAT -- and it is why the
 //     printer is not, and must never be, a Deployment: two replicas sharing a

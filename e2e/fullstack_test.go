@@ -29,7 +29,7 @@
 //     that status originated on the owner's socket and crossed Redis.
 //
 // The crypto/submit/stream/docker primitives live in harness.go (shared with the
-// Goal T9 chaos suite). See docker-compose.full.yml for why the two nodes are
+// Goal T9 chaos suite). See infra/compose/full.yml for why the two nodes are
 // named replicas rather than `--scale cloud-server=2`, and
 // docs/study/17-testing-strategy.md.
 package e2e

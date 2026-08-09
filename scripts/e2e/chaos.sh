@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Orchestrates the resilience/chaos suite (testing-plan Part 7 / Goal T9): bring
-# up a CLEAN two-node compose stack (docker-compose.full.yml, same topology as
+# up a CLEAN two-node compose stack (infra/compose/full.yml, same topology as
 # the Goal T8 full-system E2E), seed the fixture, then run the Go chaos driver
 # (e2e/, -tags chaos), which kills Redis / Postgres / the socket-owning cloud
 # node / the printer in turn and asserts every job still reaches a terminal
@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 ROOT="$(pwd)"
 
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.full.yml)
+COMPOSE=(docker compose -f docker-compose.yml -f infra/compose/full.yml)
 OWNER_URL="http://localhost:8080"     # cloud-server: holds the printer socket
 NONOWNER_URL="http://localhost:8081"  # cloud-server-2: survivor node
 
@@ -71,7 +71,7 @@ if [ -z "$printer_live" ]; then
 fi
 
 # Seed against THIS stack's project (full compose files), not the browser-E2E pair.
-E2E_COMPOSE_FILES="-f docker-compose.yml -f docker-compose.full.yml" bash scripts/e2e/seed.sh
+E2E_COMPOSE_FILES="-f docker-compose.yml -f infra/compose/full.yml" bash scripts/e2e/seed.sh
 
 # Postgres creds for the driver's exactly-once assertions (audit_events counts).
 PG_USER="$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)"

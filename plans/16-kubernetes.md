@@ -336,7 +336,7 @@ pointing `CLOUD_SERVER_WS_URL` at a **NodePort** Service exposing the cloud-serv
 on 8443. This is strictly better than hiding it in-cluster, because it proves the interesting
 property: the printer dials in and lands on *one arbitrary pod*, and a job submitted to either
 of the other two still reaches it via the Redis fan-in. That is the same assertion
-`docker-compose.full.yml` makes today, re-proved on a cluster where the pods are on different
+`infra/compose/full.yml` makes today, re-proved on a cluster where the pods are on different
 nodes.
 
 **One physical printer is not a limitation for this demo.** The scaling claim is about the
@@ -396,7 +396,7 @@ node. `scripts/k8s/e2e.sh` resolves the node IP at run time (`kubectl get pod mi
 ### 6.2 Proving fan-in when you cannot address a pod
 
 The Compose full-system suite proves fan-in by giving the two cloud replicas **distinct names
-and distinct host ports** (`docker-compose.full.yml`), precisely because `--scale` replicas share
+and distinct host ports** (`infra/compose/full.yml`), precisely because `--scale` replicas share
 one alias and cannot be individually addressed. A Kubernetes Service load-balances, so that
 lever is gone: "submit to a pod that is *not* the socket owner" needs a stated method or the
 acceptance is not executable. Pick one:
@@ -454,7 +454,7 @@ under 5 %, and that scale-down actually happened.
 ### 7.1 What "drive it with the existing k6 script" costs
 
 - **k6 is not installed on this host.** Every existing load run uses the pinned k6 *container* on
-  the Compose network (`docker-compose.load.yml`). The cluster equivalent is a k6 Job (or
+  the Compose network (`infra/compose/load.yml`). The cluster equivalent is a k6 Job (or
   `kubectl run --rm`) **inside** the cluster — not a host-side run through the ingress, which
   would add TLS, Traefik and the guest rate limit to the measured path and invalidate the
   comparison outright.
@@ -468,7 +468,7 @@ under 5 %, and that scale-down actually happened.
   has no shared filesystem**, so `handleSummary`'s `/report/submission.json` cannot be
   bind-mounted out: the pod command prints the JSON between markers and the run parses it from
   `kubectl logs`. The emptyDir it writes to needs `fsGroup: 12345`, or the k6 user cannot write
-  and k6 exits 0 regardless — the same silent-summary-loss trap `docker-compose.load.yml`
+  and k6 exits 0 regardless — the same silent-summary-loss trap `infra/compose/load.yml`
   documents for the uid mapping.*
 - **The load profile overrides `MINIO_PUBLIC_ENDPOINT` to `""`.** `submission.js` follows the
   pre-signed `upload_url`, and the base config signs it for `blob.automail.local`, which nothing

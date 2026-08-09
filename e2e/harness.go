@@ -311,7 +311,7 @@ func composeArgs(t *testing.T, extra ...string) []string {
 	root := env(t, "E2E_REPO_ROOT")
 	override := os.Getenv("E2E_COMPOSE_OVERRIDE")
 	if override == "" {
-		override = "docker-compose.full.yml"
+		override = "infra/compose/full.yml"
 	}
 	base := []string{
 		"compose",

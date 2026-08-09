@@ -1,6 +1,6 @@
 # Load-profile overlay for the k3d cluster (Goal K7 / plans/16-kubernetes.md §7).
 #
-# This is the Kubernetes equivalent of docker-compose.load.yml: the k3d-local
+# This is the Kubernetes equivalent of infra/compose/load.yml: the k3d-local
 # environment with exactly one value changed, applied only for the duration of a
 # `make k8s-load` run and reverted afterwards (scripts/k8s/load-check.sh does
 # both, including on abort).
@@ -16,7 +16,7 @@
 #
 # Empty means "fall back to the internal MinIO client" (services/cloud/main.go),
 # i.e. sign for `minio:9000` -- which is exactly what a pod on the cluster
-# network can reach. docker-compose.load.yml sets the identical empty value for
+# network can reach. infra/compose/load.yml sets the identical empty value for
 # the identical reason; the two load profiles agree by construction.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

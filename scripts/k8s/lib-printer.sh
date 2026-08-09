@@ -24,7 +24,7 @@ source "$ROOT/scripts/k8s/versions.env"
 # so a caller's EXIT trap fires with that as its cwd and a relative -f would
 # silently fail to find the file — leaving the printer container running after
 # every run.
-PRINTER_COMPOSE=(docker compose --project-directory "$ROOT" -f "$ROOT/docker-compose.k8s-printer.yml")
+PRINTER_COMPOSE=(docker compose --project-directory "$ROOT" -f "$ROOT/infra/compose/k8s-printer.yml")
 PRINTER_CONTAINER=automail-k8s-printer
 MAILBOX_ID="${DEV_MAILBOX_ID:-00000000-0000-0000-0000-000000000001}"
 # Set by start_printer; the log scan in find_socket_owner is bounded by it so a

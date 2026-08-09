@@ -5,7 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
 // Next dev server -- the point is to exercise the real assembled product
 // (portal -> cloud -> Redis -> printer decrypt -> SSE status) in a browser.
 //
-// The stack is brought up on plain http://localhost by docker-compose.e2e.yml
+// The stack is brought up on plain http://localhost by infra/compose/e2e.yml
 // (a browser "secure context", so Web Crypto and Secure cookies still work)
 // to avoid the self-signed-TLS / mixed-content friction of the Traefik edge.
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";

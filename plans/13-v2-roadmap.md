@@ -74,12 +74,12 @@ future agent) can pick it up without re-deriving the context:
   **Redis pub/sub**, so any replica can accept a job / hold a browser stream while a
   *different* replica holds the printer's dial-out socket. What is missing is purely
   operational: `docker-compose.yml`, the demo scripts, and the Proxmox doc all assume
-  one cloud host. `docker-compose.full.yml` is the sole N-node-aware artifact and it
+  one cloud host. `infra/compose/full.yml` is the sole N-node-aware artifact and it
   is a **test harness**, not a general deploy.
   - **Proof it already works (say this in interviews):** `services/cloud/stream_test.go`
     stands up **two independent hubs** — node A holds the printer socket, node B holds
     the browser SSE stream — over one shared Redis, and asserts a `delivered` frame
-    from the printer on A reaches the browser on **B**. `docker-compose.full.yml` is a
+    from the printer on A reaches the browser on **B**. `infra/compose/full.yml` is a
     deliberate two-node topology (`cloud-server` = socket owner :8080, `cloud-server-2`
     = non-owner :8081). Roadmap Phase 5 verify is `--scale cloud-server=2`.
 
@@ -124,7 +124,7 @@ future agent) can pick it up without re-deriving the context:
     the atomic guard** against double-dispatch.
 
 - **References.** "Separated field-unit deployment" (above); `services/cloud/dispatch/route.go`,
-  `services/cloud/link/hub.go`, `services/cloud/stream_test.go`; `docker-compose.full.yml`;
+  `services/cloud/link/hub.go`, `services/cloud/stream_test.go`; `infra/compose/full.yml`;
   `docs/testing-plan.md` (cross-node case); `plans/10` Phase 5 verify; `plans/01`
   field-deployed printers (dial-out boundary); `plans/15-v3-roadmap.md` (data-tier HA).
 

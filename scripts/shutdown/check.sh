@@ -26,7 +26,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 ROOT="$(pwd)"
 
 BASE=(docker compose -f docker-compose.yml)
-FULL=(docker compose -f docker-compose.yml -f docker-compose.full.yml)
+FULL=(docker compose -f docker-compose.yml -f infra/compose/full.yml)
 PHASE="${PHASE:-ab}"
 
 cleanup() {
@@ -152,13 +152,13 @@ phase_b() {
   fi
   echo "   /livez serving (liveness split from readiness)"
 
-  E2E_COMPOSE_FILES="-f docker-compose.yml -f docker-compose.full.yml" bash scripts/e2e/seed.sh
+  E2E_COMPOSE_FILES="-f docker-compose.yml -f infra/compose/full.yml" bash scripts/e2e/seed.sh
 
   echo "==> Running the shutdown driver"
   ( cd e2e && \
     E2E_OWNER_URL="http://localhost:8080" \
     E2E_REPO_ROOT="$ROOT" \
-    E2E_COMPOSE_OVERRIDE="docker-compose.full.yml" \
+    E2E_COMPOSE_OVERRIDE="infra/compose/full.yml" \
       go test -tags shutdown -count=1 -v -timeout 5m ./... )
 
   echo "✔ Phase B: the draining server closed the stream itself"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Load / performance run (testing-plan Part 8 / Goal T10). Brings up a single-node
-# cloud stack with pprof enabled (docker-compose.load.yml), then:
+# cloud stack with pprof enabled (infra/compose/load.yml), then:
 #   Phase A  submission throughput  -- k6 ramps the guest submission arrival rate,
 #            records p95 latency + error rate (finds the knee).
 #   Phase B  SSE fan-out boundedness -- k6 holds N concurrent /jobs/:id/stream
@@ -21,7 +21,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 ROOT="$(pwd)"
 
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.load.yml)
+COMPOSE=(docker compose -f docker-compose.yml -f infra/compose/load.yml)
 CLOUD_URL="http://localhost:8080"
 PPROF_URL="http://localhost:6060"
 REPORT_DIR="scripts/load/report"
@@ -33,7 +33,7 @@ BURST="${BURST:-60}" # Phase C: jobs queued while the printer is offline
 
 # The k6 container writes its summary into the bind-mounted report dir; run it as
 # the invoking user so the write is permitted and the file is host-user-owned
-# (see the `user:` mapping on the k6 service in docker-compose.load.yml).
+# (see the `user:` mapping on the k6 service in infra/compose/load.yml).
 export LOAD_UID="$(id -u)" LOAD_GID="$(id -g)"
 
 PG_USER="$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)"
@@ -102,7 +102,7 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-E2E_COMPOSE_FILES="-f docker-compose.yml -f docker-compose.load.yml" bash scripts/e2e/seed.sh
+E2E_COMPOSE_FILES="-f docker-compose.yml -f infra/compose/load.yml" bash scripts/e2e/seed.sh
 
 RECIPIENT="$(curl -s "${CLOUD_URL}/recipients?q=Testmann" | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["recipient_id"])')"
 echo "==> Seeded recipient: ${RECIPIENT}"
@@ -123,7 +123,7 @@ rm -f "${REPORT_DIR}/submission.json"
 if [ ! -s "${REPORT_DIR}/submission.json" ]; then
   echo "!! Phase A produced no ${REPORT_DIR}/submission.json -- k6's handleSummary export failed" >&2
   echo "   (check the k6 'failed to handle the end-of-test summary' line above; usually a" >&2
-  echo "    permission mismatch on the report bind-mount -- see the k6 user: mapping in docker-compose.load.yml)" >&2
+  echo "    permission mismatch on the report bind-mount -- see the k6 user: mapping in infra/compose/load.yml)" >&2
   exit 1
 fi
 

@@ -29,7 +29,7 @@
 # Compose interpolates on EVERY subcommand, so the K8S_MINIO_HOST_IP guard
 # below binds `down`, `logs` and `ps` as much as `up`. Reaching for one of those
 # by hand, outside those targets:
-#   K8S_MINIO_HOST_IP=0.0.0.0 docker compose -f docker-compose.k8s-printer.yml logs
+#   K8S_MINIO_HOST_IP=0.0.0.0 docker compose -f infra/compose/k8s-printer.yml logs
 name: automail-k8s
 
 services:

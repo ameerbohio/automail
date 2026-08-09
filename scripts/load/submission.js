@@ -2,7 +2,7 @@
 // submission arrival rate and records p95 latency + error rate for the POST
 // /jobs call, so the knee (where latency climbs / errors appear) is visible.
 //
-// Runs INSIDE the compose network (see docker-compose.load.yml): the presigned
+// Runs INSIDE the compose network (see infra/compose/load.yml): the presigned
 // upload URL is signed for the internal minio:9000 host, which this k6 container
 // reaches directly. The full three-call guest flow is exercised per iteration
 // (upload-url -> PUT ciphertext -> POST /jobs); only the POST is timed.

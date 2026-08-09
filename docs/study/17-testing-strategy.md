@@ -144,7 +144,7 @@ claim: that the cloud scales horizontally because Redis — not any one process 
 is the dispatch fan-in and status fan-out backbone. Part 5 / `make test-e2e-full`
 closes that gap with a standalone Go driver (`e2e/`, zero external deps — it just
 speaks the public HTTP contract and the same crypto wire format the browser uses)
-against a **two-node** stack (`docker-compose.full.yml`).
+against a **two-node** stack (`infra/compose/full.yml`).
 
 The whole test turns on one topological fact: the printer's dial-out mTLS socket
 lands on exactly one cloud node. We pin that by naming the two nodes — the
@@ -240,7 +240,7 @@ not the product; a real mailbox's slot empties when mail is collected.
 `make load` (Part 8) is the layer that replaces "it seems fast" with numbers, and
 — more importantly — with a **committed baseline** so a future change that makes
 things worse fails the build. It runs a single-node stack with pprof enabled
-(`docker-compose.load.yml`, `PPROF_ADDR` set for that profile only — never in the
+(`infra/compose/load.yml`, `PPROF_ADDR` set for that profile only — never in the
 base compose or on a deploy host, since pprof exposes heap/goroutine dumps), and
 drives k6 from *inside* the compose network, because the cloud signs its presigned
 upload URLs for the internal `minio:9000` host.

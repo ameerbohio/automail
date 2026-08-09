@@ -1,7 +1,7 @@
 # Full-system E2E override (testing-plan Part 5 / Goal T8). Use with:
-#   docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
+#   docker compose -f docker-compose.yml -f infra/compose/full.yml up --build
 #
-# What this proves that the Part 4b browser E2E (docker-compose.e2e.yml) does
+# What this proves that the Part 4b browser E2E (infra/compose/e2e.yml) does
 # not: the *distributed* seams. It runs TWO independent cloud processes over one
 # shared Redis/Postgres/MinIO, and drives a real encrypted job through them with
 # the printer's dial-out socket pinned to exactly one of the two nodes.
@@ -41,7 +41,7 @@ services:
   cloud-server:
     # Base compose's depends_on: condition: service_healthy already blocks start
     # until Postgres/Redis/MinIO answer; this is just a defensive backstop in
-    # case a healthcheck flakes. Same reasoning as docker-compose.e2e.yml.
+    # case a healthcheck flakes. Same reasoning as infra/compose/e2e.yml.
     restart: on-failure
     environment:
       # Presign the browser/driver upload URL against the host-reachable MinIO so

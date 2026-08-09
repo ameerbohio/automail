@@ -142,7 +142,7 @@ first. There are two candidate controls and they are not equivalent:
   (`infra/k8s/overlays/k3d-load`), so pre-signed upload URLs are signed for the
   in-cluster `minio:9000` rather than the browser-facing edge hostname. Without
   it every iteration fails at the PUT against a name no pod can resolve.
-  `docker-compose.load.yml` sets the identical empty value for the identical
+  `infra/compose/load.yml` sets the identical empty value for the identical
   reason. The overlay is reverted at the end of the run, including on abort.
 - **No printer is running.** Every submission therefore takes the *queued* path
   (`XADD` to `jobs:pending`) rather than immediate dispatch. This is stated

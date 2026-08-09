@@ -1,8 +1,8 @@
 # Deployment-parity smoke override (Goal T12). Use with:
 #   make deploy-smoke        (or scripts/deploy/smoke.sh)
 #
-# The point of this file is what it does NOT change. Unlike docker-compose.e2e.yml
-# (Part 4b) and docker-compose.full.yml (Part 5), which publish services directly
+# The point of this file is what it does NOT change. Unlike infra/compose/e2e.yml
+# (Part 4b) and infra/compose/full.yml (Part 5), which publish services directly
 # on host ports and bypass the Traefik edge entirely, the deploy smoke runs the
 # *production profile*: the base docker-compose.yml as-is, reached only through
 # Traefik on the routed hostnames, with the real pre-signed-upload path and the

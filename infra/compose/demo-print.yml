@@ -1,6 +1,6 @@
 # Print-enabled demo layer: `make demo-print` (= PRINT=1 make demo).
 #
-# Layered on top of docker-compose.demo.yml. It turns OFF DEV_MODE so the printer
+# Layered on top of infra/compose/demo.yml. It turns OFF DEV_MODE so the printer
 # makes the real `lp` call -- the one thing no other profile in this repo
 # exercises -- and supplies a CUPS server for that call to reach.
 #

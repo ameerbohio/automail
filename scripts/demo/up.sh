@@ -30,7 +30,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 ROOT="$(pwd)"
 
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.demo.yml)
+COMPOSE=(docker compose -f docker-compose.yml -f infra/compose/demo.yml)
 fail() { echo "!! $1" >&2; [ -n "${2:-}" ] && echo "   fix: $2" >&2; exit 1; }
 
 # docker_up: is the daemon reachable? `timeout -k` is load-bearing -- a bare
@@ -60,7 +60,7 @@ ensure_docker() {
 
 # PRINT=1 layers the print-enabled override: DEV_MODE off, so the printer makes
 # the REAL `lp` call, against a CUPS server running as a container (see
-# docker-compose.demo-print.yml for why not the host's).
+# infra/compose/demo-print.yml for why not the host's).
 #
 # PRINT=host instead uses the host's cupsd through the mounted socket -- the
 # Proxmox arrangement (docs/cups-host-setup.md). Only that mode needs the host
@@ -72,8 +72,8 @@ ensure_docker() {
 PRINTER_NAME="${PRINTER_NAME:-Canon_MF240}"
 export PRINTER_NAME
 case "${PRINT:-}" in
-  1)    COMPOSE+=(-f docker-compose.demo-print.yml) ;;
-  host) COMPOSE+=(-f docker-compose.demo-print.yml)
+  1)    COMPOSE+=(-f infra/compose/demo-print.yml) ;;
+  host) COMPOSE+=(-f infra/compose/demo-print.yml)
         export CUPS_SERVER=""   # fall back to /run/cups/cups.sock
         ;;
 esac
@@ -182,7 +182,7 @@ done
 [ -n "${PRINT:-}" ] && verify_container_can_print
 
 echo "==> [5/6] Seeding the fixture"
-E2E_COMPOSE_FILES="-f docker-compose.yml -f docker-compose.demo.yml" bash scripts/e2e/seed.sh >/dev/null
+E2E_COMPOSE_FILES="-f docker-compose.yml -f infra/compose/demo.yml" bash scripts/e2e/seed.sh >/dev/null
 
 # Replace the seeded admin. scripts/e2e/seed.sh inserts admin@automail.test with
 # a bcrypt hash of a password printed in this repo -- fine for a local fixture,

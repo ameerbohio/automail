@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Orchestrates the full-system E2E (testing-plan Part 5 / Goal T8): bring up a
-# CLEAN TWO-NODE compose stack (docker-compose.full.yml), seed the fixture, run
+# CLEAN TWO-NODE compose stack (infra/compose/full.yml), seed the fixture, run
 # the standalone Go driver (e2e/) that pushes a real encrypted job all the way to
 # "delivered" and asserts the printer /dev/shm wipe + the cross-node fan-in /
 # fan-out, then tear down.
@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 ROOT="$(pwd)"
 
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.full.yml)
+COMPOSE=(docker compose -f docker-compose.yml -f infra/compose/full.yml)
 OWNER_URL="http://localhost:8080"     # cloud-server: holds the printer socket
 NONOWNER_URL="http://localhost:8081"  # cloud-server-2: never holds the socket
 
@@ -74,7 +74,7 @@ if [ -z "$printer_live" ]; then
 fi
 
 # Seed against THIS stack's project (full compose files), not the browser-E2E pair.
-E2E_COMPOSE_FILES="-f docker-compose.yml -f docker-compose.full.yml" bash scripts/e2e/seed.sh
+E2E_COMPOSE_FILES="-f docker-compose.yml -f infra/compose/full.yml" bash scripts/e2e/seed.sh
 
 echo "==> Running the full-system Go driver"
 cd e2e

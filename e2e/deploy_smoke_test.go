@@ -277,7 +277,7 @@ func TestUploadURLIsBrowserReachable(t *testing.T) {
 // A green run here means a fresh clone plus the documented bring-up steps
 // produce a working system on the first try -- which is the whole point of this
 // goal. The one thing it cannot prove is paper coming out of the printer:
-// DEV_MODE=true skips only the `lp` call (docker-compose.deploy-smoke.yml), and
+// DEV_MODE=true skips only the `lp` call (infra/compose/deploy-smoke.yml), and
 // the physical step stays owner-gated on the Proxmox VM.
 func TestProductionProfile_JobReachesDelivered(t *testing.T) {
 	apiURL := "https://" + apiHost

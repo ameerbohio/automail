@@ -51,12 +51,12 @@ spec:
         # The k6 image runs as uid 12345, and an emptyDir mounts root-owned, so
         # handleSummary's write to /report would fail with EACCES — and k6 exits
         # 0 anyway, which is exactly how the Compose profile once lost its
-        # summaries (see the `user:` mapping note in docker-compose.load.yml).
+        # summaries (see the `user:` mapping note in infra/compose/load.yml).
         # fsGroup makes the volume group-writable by the container's group.
         fsGroup: 12345
       containers:
         - name: k6
-          # A local re-tag of grafana/k6:2.1.0 — the same pin docker-compose.load.yml
+          # A local re-tag of grafana/k6:2.1.0 — the same pin infra/compose/load.yml
           # uses. It has to be re-tagged because `k3d image import` cannot import a
           # multi-platform image pulled from a registry (it fails with
           # `ctr: content digest ... not found` and still exits 0); a one-line

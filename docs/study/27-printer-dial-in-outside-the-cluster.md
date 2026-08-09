@@ -1,6 +1,6 @@
 # The device that is not a workload: dialing into a cluster from outside it
 
-*Code: `docker-compose.k8s-printer.yml`, `scripts/k8s/e2e.sh`, `e2e/k8s_test.go`, `infra/k8s/overlays/k3d-local/kustomization.yaml`. Plan: `plans/16-kubernetes.md` §6. Acceptance: `make k8s-e2e`.*
+*Code: `infra/compose/k8s-printer.yml`, `scripts/k8s/e2e.sh`, `e2e/k8s_test.go`, `infra/k8s/overlays/k3d-local/kustomization.yaml`. Plan: `plans/16-kubernetes.md` §6. Acceptance: `make k8s-e2e`.*
 
 ## What it is
 
@@ -36,7 +36,7 @@ Whatever the printer dials must therefore **answer to the literal name `minio` o
 |---|---|
 | NodePort | Range is 30000–32767. The port is baked into the signature. Dead. |
 | k3d host port mapping | Frozen at cluster creation; retrofitting destroys the PVCs. Dead. |
-| `kubectl port-forward` on the host | Host `:9000` is not ours — `docker-compose.e2e.yml` publishes the *Compose* MinIO on `0.0.0.0:9000`. It would either fail to bind or, worse, silently point the printer at the wrong object store. Dead. |
+| `kubectl port-forward` on the host | Host `:9000` is not ours — `infra/compose/e2e.yml` publishes the *Compose* MinIO on `0.0.0.0:9000`. It would either fail to bind or, worse, silently point the printer at the wrong object store. Dead. |
 | **`hostPort` on the MinIO pod** | Binds inside the k3d **node container**, whose IP is routable from the host because k3d nodes are Docker containers on a bridge. Works. |
 
 So the overlay gives MinIO `hostPort: 9000`, and the printer maps the name onto the node's IP with a Docker `extra_hosts` entry. The `Host` header stays `minio:9000` and the signature verifies untouched.

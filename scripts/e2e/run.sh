@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.e2e.yml)
+COMPOSE=(docker compose -f docker-compose.yml -f infra/compose/e2e.yml)
 BASE_URL="http://localhost:3000"
 
 cleanup() {

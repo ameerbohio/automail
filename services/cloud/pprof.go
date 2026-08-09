@@ -9,7 +9,7 @@ import (
 
 // startPprof serves Go's runtime profiler (heap, goroutine, allocs, CPU) on a
 // dedicated listener, but only when addr is non-empty. It is enabled solely by
-// docker-compose.load.yml for Goal T10 load runs (testing-plan Part 8) so a load
+// infra/compose/load.yml for Goal T10 load runs (testing-plan Part 8) so a load
 // script can snapshot goroutine/heap counts; the base compose and any deploy
 // host leave PPROF_ADDR unset, so this returns immediately and the profiler is
 // never exposed. Kept on its own listener (not the public mux) because pprof

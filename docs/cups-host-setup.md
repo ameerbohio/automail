@@ -213,7 +213,7 @@ write, and unlink-before-delivered are already implemented and unit-tested.
 
 Not a problem with the setup above — the host queue was correct and working
 (`echo test | lp -d Canon_MF240` printed fine) the whole time. The blocker was
-in `docker-compose.demo-print.yml` (used by `scripts/demo/up.sh` for the
+in `infra/compose/demo-print.yml` (used by `scripts/demo/up.sh` for the
 public-demo-plus-real-printing combination, `PRINT=host`): it hardcoded the
 printer service's `CUPS_SERVER` as the **literal** `cups`, so the script's
 `export CUPS_SERVER=""` (meant to fall back to this doc's host-socket setup)

@@ -26,7 +26,7 @@ SEED_BACKEND="${SEED_BACKEND:-compose}"
 if [ -n "${E2E_COMPOSE_FILES:-}" ]; then
   read -ra COMPOSE_FILES <<<"$E2E_COMPOSE_FILES"
 else
-  COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.e2e.yml)
+  COMPOSE_FILES=(-f docker-compose.yml -f infra/compose/e2e.yml)
 fi
 COMPOSE=(docker compose "${COMPOSE_FILES[@]}")
 

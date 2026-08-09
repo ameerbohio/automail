@@ -5,7 +5,7 @@
 # Unlike scripts/e2e/{run,full,chaos}.sh, which drive override stacks that publish
 # services on host ports and bypass Traefik, this brings up the PRODUCTION PROFILE
 # (docker-compose.yml as-is, plus the two documented deviations in
-# docker-compose.deploy-smoke.yml) and drives it only through the HTTPS edge.
+# infra/compose/deploy-smoke.yml) and drives it only through the HTTPS edge.
 #
 # Phase 0 is a preflight that checks the same prerequisites docs/deploy-checklist.md
 # lists, so the checklist is executable rather than aspirational: every failure
@@ -34,7 +34,7 @@ ROOT="$(pwd)"
 export TRAEFIK_HTTP_PORT="${TRAEFIK_HTTP_PORT:-8080}"
 export TRAEFIK_HTTPS_PORT="${TRAEFIK_HTTPS_PORT:-8443}"
 
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.deploy-smoke.yml)
+COMPOSE=(docker compose -f docker-compose.yml -f infra/compose/deploy-smoke.yml)
 
 cleanup() {
   if [ "${KEEP_STACK:-}" = "1" ]; then
@@ -151,11 +151,11 @@ if [ -z "$printer_live" ]; then
 fi
 
 echo "==> [4/5] Seeding the fixture"
-E2E_COMPOSE_FILES="-f docker-compose.yml -f docker-compose.deploy-smoke.yml" bash scripts/e2e/seed.sh
+E2E_COMPOSE_FILES="-f docker-compose.yml -f infra/compose/deploy-smoke.yml" bash scripts/e2e/seed.sh
 
 echo "==> [5/5] Driving the production profile through the HTTPS edge"
 cd e2e
 E2E_REPO_ROOT="$ROOT" \
-E2E_COMPOSE_OVERRIDE="docker-compose.deploy-smoke.yml" \
+E2E_COMPOSE_OVERRIDE="infra/compose/deploy-smoke.yml" \
 SMOKE_HTTPS_PORT="$TRAEFIK_HTTPS_PORT" \
   go test -tags smoke -count=1 -v -timeout 5m ./...
