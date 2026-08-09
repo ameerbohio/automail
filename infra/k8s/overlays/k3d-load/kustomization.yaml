@@ -1,0 +1,40 @@
+# Load-profile overlay for the k3d cluster (Goal K7 / plans/16-kubernetes.md §7).
+#
+# This is the Kubernetes equivalent of docker-compose.load.yml: the k3d-local
+# environment with exactly one value changed, applied only for the duration of a
+# `make k8s-load` run and reverted afterwards (scripts/k8s/load-check.sh does
+# both, including on abort).
+#
+# WHY IT HAS TO EXIST AT ALL. `scripts/load/submission.js` drives the real guest
+# flow, so each iteration follows the pre-signed `upload_url` the cloud hands
+# back and PUTs the ciphertext to it. The k3d-local overlay signs that URL for
+# `blob.automail.local:9443` -- the browser-facing edge -- and nothing INSIDE
+# the cluster can resolve that name. k6 must run inside the cluster (§7.1: a
+# host-side run would put TLS, Traefik and the guest rate limit in the measured
+# path and invalidate the comparison outright), so without this override every
+# iteration fails at the PUT and the run measures nothing but 500s.
+#
+# Empty means "fall back to the internal MinIO client" (services/cloud/main.go),
+# i.e. sign for `minio:9000` -- which is exactly what a pod on the cluster
+# network can reach. docker-compose.load.yml sets the identical empty value for
+# the identical reason; the two load profiles agree by construction.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: automail
+
+resources:
+  - ../k3d-local
+
+configMapGenerator:
+  # behavior: merge -- override one literal in the ConfigMap the k3d-local
+  # overlay generates, leaving MINIO_CORS_ORIGIN and MINIO_PUBLIC_SECURE alone.
+  # The merged content hashes to a NEW ConfigMap name, which Kustomize rewrites
+  # into the cloud-server pod spec, so applying this overlay rolls the pods onto
+  # the load value instead of leaving them running the browser value forever.
+  # That roll is the mechanism, not a side effect: a ConfigMap edit in place
+  # would change nothing until something restarted the pods.
+  - name: automail-config
+    behavior: merge
+    literals:
+      - MINIO_PUBLIC_ENDPOINT=

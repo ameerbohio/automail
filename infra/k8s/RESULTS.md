@@ -101,3 +101,120 @@ Measured by `make k8s-failure` (`scripts/k8s/failure-check.sh` →
   traffic, and a 429 would read as a dropped request. The rollout property being
   tested is endpoint propagation and drain ordering, which is path-independent;
   throughput under load is Goal K7's measurement, not this one.
+
+---
+
+## Goal K7 — HPA under k6 load
+
+Command: `make k8s-load` (`scripts/k8s/load-check.sh` → `scripts/load/k8s-report.py`),
+against the same cluster the other K-goals use.
+
+### What is being measured, and against what
+
+The claim is **"the tier autoscales under load on my dev host"**, and the only
+way that claim survives contact with an interviewer is if the control is stated
+first. There are two candidate controls and they are not equivalent:
+
+| Control | What it is | Why it is / is not the gate |
+|---|---|---|
+| `scripts/load/baseline.json` (Goal T10) | The committed Compose baseline. | **Context, not pass/fail.** It was measured on a single cloud-server container with **no CPU limit**, on the Compose network. Every pod here has a request *and* a 500m limit, so the topology differs in the one dimension the measurement is about. Quoting it as a gate would be comparing two different systems. |
+| The single-replica reference run | The same load, on this cluster, with the HPA deleted and `replicas: 1`. | **This is the gate.** Same kernel, same images, same limits, minutes apart — the only variable left is the replica count. |
+
+### Four instruments, declared
+
+- **The load generator runs inside the cluster.** k6 is not installed on this
+  host, and a host-side run would have to come in through the Traefik edge,
+  adding TLS termination, an ingress hop and the guest rate limit to the
+  measured path — none of which the Compose baseline contains. The k6 pods hit
+  the `cloud-server` ClusterIP Service directly, exactly as the Compose k6
+  container hit `cloud-server:8080`.
+- **`scripts/load/submission.js` is unmodified**, byte-for-byte the file `make
+  load` runs. One k6 pod peaks at roughly 110m of cloud-server CPU here, which
+  against a 100m request is not enough to cross a 60% target at two replicas, so
+  the offered load is multiplied by running the *same* script in several pods
+  rather than by editing its stages. Editing the stages would have made the
+  Compose numbers incomparable in exactly the way this whole section is trying
+  to avoid.
+- **The load profile overrides `MINIO_PUBLIC_ENDPOINT` to empty**
+  (`infra/k8s/overlays/k3d-load`), so pre-signed upload URLs are signed for the
+  in-cluster `minio:9000` rather than the browser-facing edge hostname. Without
+  it every iteration fails at the PUT against a name no pod can resolve.
+  `docker-compose.load.yml` sets the identical empty value for the identical
+  reason. The overlay is reverted at the end of the run, including on abort.
+- **No printer is running.** Every submission therefore takes the *queued* path
+  (`XADD` to `jobs:pending`) rather than immediate dispatch. This is stated
+  because it differs from the Compose baseline, where a `DEV_MODE` printer was
+  up: it is chosen because a single dev printer has five slots, so under
+  sustained submission rates some fraction of jobs would queue anyway and the
+  measured path would become a non-deterministic mix. One path for every
+  iteration makes the two phases comparable to each other, which is what the
+  gate above requires.
+
+<!-- BEGIN K7 MEASUREMENTS -->
+
+Measured by `make k8s-load` (`scripts/k8s/load-check.sh` → `scripts/load/k8s-report.py`) on **2026-08-09T13:05:36-04:00**, k3s `v1.33.13+k3s2`, against the four-node k3d cluster on this WSL2 dev host. Load is `scripts/load/submission.js` **unmodified** — the same file `make load` runs on Compose — driven from **3 in-cluster k6 pods per wave**, 3 waves per phase.
+
+HPA: `minReplicas 2`, `maxReplicas 8`, target **60% of the CPU request** (request `100m`, limit `500m`) — so the trigger is utilization of the *request*, not of a core, and not of the limit.
+
+**Single-replica reference** (HPA deleted, `replicas: 1`) — the control this run is judged against:
+
+| Wave | Replicas during wave | Peak CPU vs target | Submissions | Offered rate | p95 (worst generator) | Errors |
+|---|---|---|---|---|---|---|
+| 1 | 1 | — | 5436 | 88.4/s | 10.79 ms | 0.00% |
+| 2 | 1 | — | 5436 | 88.3/s | 5.60 ms | 0.00% |
+| 3 | 1 | — | 5436 | 88.4/s | 9.59 ms | 0.00% |
+
+**Autoscaled** (identical load, HPA in charge):
+
+| Wave | Replicas during wave | Peak CPU vs target | Submissions | Offered rate | p95 (worst generator) | Errors |
+|---|---|---|---|---|---|---|
+| 1 | 2 → 5 | 124% | 5436 | 88.4/s | 5.56 ms | 0.00% |
+| 2 | 5 → 6 | 124% | 5436 | 88.4/s | 5.80 ms | 0.00% |
+| 3 | 6 | 59% | 5436 | 88.4/s | 5.64 ms | 0.00% |
+
+- Worst p95 across all waves: **10.79 ms at one replica → 5.80 ms autoscaled** (−46%); worst error rate 0.00% → 0.00%. Same script, same offered load, same cluster minutes apart — the only variable is how many replicas were serving it.
+- Replica count over the run: floor 1 → peak **7** (HPA spec peak 7, `maxReplicas` 8 was not reached — the controller sized to the load rather than slamming into the ceiling).
+- Peak measured CPU utilization: **124%** of the 60% target.
+- **Scale-down began 283s after the load stopped** and reached `minReplicas` at 299s. That delay is `scaleDown.stabilizationWindowSeconds: 300` being waited out, not sluggishness: the controller takes the *maximum* recommendation across the trailing five minutes, so replicas only fall once no busy sample remains in the window. Scale-up has a 0s window by contrast — under-capacity is user-visible, over-capacity costs a few pod-minutes.
+<!-- END K7 MEASUREMENTS -->
+
+### Context: the Compose baseline, quoted as context and not as a gate
+
+`scripts/load/baseline.json` recorded **p95 7.41 ms at 28.63 req/s over 1812
+iterations** on one unlimited Compose container. Because `submission.js` uses a
+`ramping-arrival-rate` executor, its iteration count is deterministic — each k6
+pod above ran the same **1812** iterations, so the per-generator workload is
+literally identical and only the topology differs. Three generators against one
+*limited* cluster replica (~88 req/s offered, p95 10.79 ms) is therefore roughly
+three times the Compose offered rate at ~1.5× its p95 — the direction one would
+expect from a pod capped at 500m CPU, and the reason the cluster's own
+single-replica run, not this number, is the gate.
+
+### What this does *not* prove
+
+- **The single replica was never saturated, so this is a proportionality demo,
+  not a rescue.** At one replica the tier still answered every request — 0%
+  errors, p95 10.79 ms — while burning ~327m of its 500m CPU limit. The HPA
+  scaled because utilization of the *100m request* was over 60%, which is a
+  deliberately conservative trigger, not because the tier was failing. A demo
+  that showed latency collapsing at one replica and recovering at seven would be
+  a stronger story; it would also have required either a heavier generator than
+  this host can run beside the cluster, or a request sized to lie.
+- **This is not a throughput claim.** "Autoscaled 2→N pods under k6 load on a
+  WSL2 dev host" is what the numbers support. "Handles N req/s in production" is
+  not, and nothing here should be quoted that way: the load generators, all four
+  Kubernetes nodes, Postgres, Redis and MinIO share one kernel, one Docker
+  daemon and one disk, so the generator and the system under test compete for
+  the same cores.
+- **The HPA scaled on CPU only.** Requests-in-flight, queue depth or
+  submission latency would be better signals for this workload, and are what a
+  production autoscaler would use (`external`/`pods` metrics via an adapter).
+  CPU is what metrics-server serves out of the box, and adding an adapter proves
+  nothing further about the design.
+- **The data tier did not scale and cannot.** One Postgres, one Redis, one MinIO,
+  each with one PVC pinned to the server node. Scaling the stateless tier moves
+  the bottleneck *toward* them, which is the honest reading of any headroom
+  measured above — and the reason `plans/15-v3-roadmap.md` exists.
+- **The scale-up was measured, the failure of a scaled-out tier was not.** Goal
+  K6 covers pod loss and rollout behaviour at three replicas; nothing here
+  re-runs those scenarios at eight.

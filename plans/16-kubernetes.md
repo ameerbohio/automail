@@ -442,6 +442,15 @@ flake.
 a WSL2 dev host, said out loud, unprompted. "Autoscaled 2→N pods under k6 load on my dev host"
 is defensible; "handles N rps in production" is not.
 
+**Done in Goal K7** — `make k8s-load` (`scripts/k8s/load-check.sh` → `scripts/load/k8s-report.py`),
+measurements in `infra/k8s/RESULTS.md`. Measured: **2 → 7 replicas** under three waves of load
+(`maxReplicas: 8` deliberately not reached — the controller sized to the load), peak utilization
+**124 %** of the 60 % target, worst p95 **10.79 ms at one replica → 5.80 ms autoscaled** under the
+identical offered load, 0 % errors throughout, and scale-down beginning **283 s** after the load
+stopped. The run is a real gate, not a report: it asserts that the tier scaled past `minReplicas`,
+that the autoscaled p95 is **no worse than its own single-replica control**, that errors stayed
+under 5 %, and that scale-down actually happened.
+
 ### 7.1 What "drive it with the existing k6 script" costs
 
 - **k6 is not installed on this host.** Every existing load run uses the pinned k6 *container* on
@@ -449,26 +458,65 @@ is defensible; "handles N rps in production" is not.
   `kubectl run --rm`) **inside** the cluster — not a host-side run through the ingress, which
   would add TLS, Traefik and the guest rate limit to the measured path and invalidate the
   comparison outright.
+  *Measured (K7): a Job per wave, `completions == parallelism`, template at
+  `infra/k8s/load/k6-job.yaml`. Two costs the plan did not name. **(a) The k6 image cannot be
+  imported.** `k3d image import grafana/k6:2.1.0` fails with `ctr: content digest … not found`
+  (a registry-pulled multi-platform image) and **still exits 0**, leaving the cluster with no
+  such image and the failure surfacing later as `ErrImageNeverPull`; a one-line
+  `FROM grafana/k6:2.1.0` rebuild under a local tag is single-platform and imports cleanly, and
+  the script verifies with `crictl` per node rather than trusting the exit code. **(b) A Job pod
+  has no shared filesystem**, so `handleSummary`'s `/report/submission.json` cannot be
+  bind-mounted out: the pod command prints the JSON between markers and the run parses it from
+  `kubectl logs`. The emptyDir it writes to needs `fsGroup: 12345`, or the k6 user cannot write
+  and k6 exits 0 regardless — the same silent-summary-loss trap `docker-compose.load.yml`
+  documents for the uid mapping.*
 - **The load profile overrides `MINIO_PUBLIC_ENDPOINT` to `""`.** `submission.js` follows the
   pre-signed `upload_url`, and the base config signs it for `blob.automail.local`, which nothing
   in-cluster can resolve. The k8s run needs the same override (a Kustomize `load` patch), or
   every submission fails at the PUT.
+  *Done (K7): `infra/k8s/overlays/k3d-load`, an overlay **of** `k3d-local` whose only content is
+  a `configMapGenerator` with `behavior: merge` overriding that one literal. Merging rather than
+  patching the Deployment matters — the value reaches the pod through a hashed ConfigMap name, so
+  changing it rolls the pods onto the new value instead of leaving them running the old one. The
+  run reverts to `k3d-local` on exit **including on abort**, because a cluster left signing
+  `minio:9000` breaks the browser guest flow with no error anywhere near the cause.*
 - **The committed baseline is not an apples-to-apples gate.** `scripts/load/baseline.json` was
   measured against a **single** cloud replica with **no CPU limit**. Under Kubernetes with
   requests/limits and ≥2 replicas the topology is different, so treat the Compose baseline as
   context, not as pass/fail. The honest move is to record a fresh single-replica reference on the
   cluster first, then report the HPA run against *that* — and say both numbers came from a WSL2
   dev host.
+  *Done (K7): the reference is phase one of the same run — HPA deleted, `replicas: 1`, identical
+  waves — and it is what the acceptance gate compares against. The Compose baseline is quoted as
+  context in `RESULTS.md` with the topology difference spelled out, never as pass/fail. A useful
+  accident of `ramping-arrival-rate`: its iteration count is deterministic, so every generator pod
+  in every phase ran exactly the **1812** iterations `baseline.json` recorded, which makes the
+  per-generator workload literally identical across the two deploy targets.*
 - **HPA target is a percentage of the CPU `request`, so §5's request sizing decides whether this
   demo works at all.** Too large a request and k6 never crosses 60 %; too small and it pins at
   `maxReplicas` immediately. Cross-check the chosen request against `maxReplicas: 8` × request
   fitting inside the ~10 GiB / 24-core budget from §2.1, or the demo ends in `Pending` pods.
+  *Measured (K7): the K3 sizing held. One k6 pod drives ~110 m of cloud-server CPU here, i.e. just
+  over one 100 m request — not enough to cross 60 % at two replicas — so the load is multiplied by
+  running the **same** script in three pods rather than by editing its stages, which is what keeps
+  the Compose numbers comparable. Three generators took the tier to 124 % of target and 7 replicas,
+  short of `maxReplicas: 8`: sized to the load, no `Pending` pods.*
 - **metrics-server needs to be healthy, not merely present.** k3s ships it; in k3d it sometimes
   needs `--kubelet-insecure-tls`. The HPA also needs ~15–30 s of metrics before it reacts, so a
   short k6 stage will show nothing.
+  *Measured (K7): healthy out of the box on this k3d cluster — no `--kubelet-insecure-tls` needed.
+  The reaction lag is real and is why waves exist: the HPA first reported a usable reading 16 s
+  after being created, and during wave one it read 25 % → 67 % → 124 % of target across ~35 s
+  before acting. A single 65 s wave would have ended before the controller moved.*
 - **Scale-down uses a 300 s stabilization window by default.** Either budget the run long enough
   to observe it or set `behavior.scaleDown.stabilizationWindowSeconds` explicitly — and say which
   you did, since "why is scale-down deliberately slower than scale-up" is the interview beat.
+  *Done (K7): **both** — the value is written out explicitly in `hpa.yaml` (at the 300 s default,
+  so the manifest states a decision instead of inheriting one) *and* the run waits it out rather
+  than shortening it for convenience. Measured: first scale-down 283 s after the load stopped,
+  `minReplicas` 299 s after. Slightly under 300 s because the window is anchored to the last
+  elevated **recommendation** the controller stamped — which it computed shortly before the final
+  requests drained — not to the moment traffic stopped.*
 
 ---
 

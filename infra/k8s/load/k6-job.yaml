@@ -1,0 +1,115 @@
+# One wave of load generation (Goal K7 / plans/16-kubernetes.md §7).
+#
+# A TEMPLATE, NOT A MANIFEST THE OVERLAY APPLIES. scripts/k8s/load-check.sh
+# substitutes the __PLACEHOLDER__ tokens and pipes it to `kubectl apply`; it is
+# deliberately outside infra/k8s/overlays/ because a load generator is something
+# a run creates and deletes, not part of the deployed system.
+#
+# WHY THE GENERATOR RUNS INSIDE THE CLUSTER (§7.1). k6 is not installed on this
+# host, and the host-side alternative would drive load through the Traefik edge
+# — adding TLS termination, the ingress hop and the guest rate limit to the
+# measured path, which is precisely what the Compose baseline does not contain.
+# A pod on the cluster network reaches `cloud-server:8080` the same way the
+# Compose k6 container reached `cloud-server:8080`, so the two measurements
+# differ in topology (replicas, CPU limits) and nothing else.
+#
+# WHY WAVES ARE SEPARATE JOBS rather than one Job with `completions > parallelism`:
+# the run has to attribute each k6 summary to the replica count that was live
+# while it was produced. Sequential Jobs make wave membership explicit in the
+# object name instead of something to be inferred from pod start timestamps.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: __JOB_NAME__
+  labels:
+    app.kubernetes.io/name: k6-load
+    app.kubernetes.io/part-of: automail
+spec:
+  # completions == parallelism: every pod of the wave runs the identical script
+  # concurrently and the wave is over when all of them are. One k6 pod peaks at
+  # roughly 110m of cloud-server CPU on this host, which against a 100m request
+  # is not enough to cross a 60% utilization target at two replicas — so the
+  # offered load is multiplied by running the SAME script in N pods rather than
+  # by editing its stages. scripts/load/submission.js stays byte-identical to
+  # the one `make load` runs on Compose, which is what keeps the two comparable.
+  completions: __PARALLELISM__
+  parallelism: __PARALLELISM__
+  # No retries. A retried k6 pod would silently add an unplanned wave of load
+  # partway through another wave's measurement window.
+  backoffLimit: 0
+  # A wave is ~65s of stages plus startup. If one is still running after 5
+  # minutes something is wrong with the cluster, and the run should say so
+  # rather than hang.
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: k6-load
+    spec:
+      restartPolicy: Never
+      securityContext:
+        # The k6 image runs as uid 12345, and an emptyDir mounts root-owned, so
+        # handleSummary's write to /report would fail with EACCES — and k6 exits
+        # 0 anyway, which is exactly how the Compose profile once lost its
+        # summaries (see the `user:` mapping note in docker-compose.load.yml).
+        # fsGroup makes the volume group-writable by the container's group.
+        fsGroup: 12345
+      containers:
+        - name: k6
+          # A local re-tag of grafana/k6:2.1.0 — the same pin docker-compose.load.yml
+          # uses. It has to be re-tagged because `k3d image import` cannot import a
+          # multi-platform image pulled from a registry (it fails with
+          # `ctr: content digest ... not found` and still exits 0); a one-line
+          # `FROM grafana/k6:2.1.0` rebuild flattens it into a single-platform
+          # local image that imports cleanly. scripts/k8s/load-check.sh does this
+          # and then VERIFIES the image is in each node's containerd.
+          image: automail/k6:2.1.0
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              k6 run /scripts/submission.js; rc=$?
+              echo "<<<K6_SUMMARY rc=$rc"
+              cat /report/submission.json
+              echo
+              echo "K6_SUMMARY>>>"
+              exit 0
+          # THE WRAPPER ALWAYS EXITS 0, DELIBERATELY. submission.js carries k6
+          # thresholds (p95 < 3s, error rate < 5%) that are guardrails for the
+          # Compose regression run; here, a breach is a MEASUREMENT — the
+          # single-replica reference is expected to be slower than the autoscaled
+          # run, and a failed pod would abort the wave and lose the summary that
+          # proves it. The exit code is preserved in the marker line and reported;
+          # load-check.sh decides pass/fail from the parsed numbers.
+          env:
+            # The ClusterIP Service, not the ingress: see the header.
+            - name: BASE_URL
+              value: http://cloud-server:8080
+            - name: RECIPIENT_ID
+              value: __RECIPIENT_ID__
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: report
+              mountPath: /report
+          resources:
+            requests:
+              cpu: 250m
+              memory: 128Mi
+            # NO CPU LIMIT, deliberately. A throttled load generator under-drives
+            # the system and reports the shortfall as good latency — the failure
+            # mode where a load test says everything is fine because it never
+            # actually applied the load. The requests exist so the scheduler
+            # spreads generators across nodes instead of stacking them on one.
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: scripts
+          configMap:
+            # Created imperatively by load-check.sh from the canonical
+            # scripts/load/submission.js. Not a configMapGenerator: Kustomize
+            # refuses to read files above its root, and a copy under infra/k8s/
+            # would be a second source of truth that drifts from `make load`.
+            name: k6-scripts
+        - name: report
+          emptyDir: {}

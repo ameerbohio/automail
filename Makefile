@@ -187,6 +187,10 @@ k8s-e2e: ## Printer outside the cluster: job through the ingress to delivered + 
 k8s-failure: ## Pod kill, PDB eviction/drain and rolling update under traffic — Goal K6
 	@bash scripts/k8s/failure-check.sh
 
+.PHONY: k8s-load
+k8s-load: ## HPA under in-cluster k6 load vs a single-replica reference — Goal K7
+	@bash scripts/k8s/load-check.sh
+
 .PHONY: k8s-down
 k8s-down: ## Delete the k3d cluster and verify no containers/networks/volumes leak — Goal K1
 	@bash scripts/k8s/down.sh

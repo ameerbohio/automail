@@ -252,6 +252,30 @@ Answer: _(to be filled in)_
 
 ---
 
+## OWNER DECISION — the HPA floor and the PDB floor are the same number (Goal K7)
+
+**Q: `HorizontalPodAutoscaler.minReplicas` is 2 and `PodDisruptionBudget.minAvailable`
+is 2. At the HPA's floor the budget therefore allows **zero** voluntary
+disruptions, so a `kubectl drain` blocks until traffic (or an operator) raises
+the replica count. Should the floor be 3, should the budget become
+`maxUnavailable: 1` / `minAvailable: 50%`, or is the block the correct
+behaviour?**
+*Context: both numbers came from the spec (`plans/16-kubernetes.md` §5, §7) and
+both are individually defensible — "never fewer than two replicas" and "never
+fewer than two available". Together they mean an idle cluster cannot be drained
+for a kernel upgrade without a human first scaling the tier up. Arguments for
+each: leaving it blocks the drain, which is the PDB refusing to trade away the
+last redundant replica and is arguably right; `maxUnavailable: 1` would always
+permit exactly one eviction at any scale, at the cost of allowing a drain down
+to one replica; `minReplicas: 3` raises the idle cost of the tier by 50% to buy
+drainability. The concrete consequence in this repo today: `make k8s-failure`
+(Goal K6) has to scale the Deployment to 3 before its drain scenario, and its
+preflight says so — see the note at the bottom of
+`infra/k8s/base/cloud-server/hpa.yaml`.*
+Answer: _(to be filled in)_
+
+---
+
 ## See also
 - [16-hybrid-encryption.md](16-hybrid-encryption.md) — answers the AES/RSA and passphrase-hygiene questions above
 - [.env.example](../../.env.example) — the unwired `REDIS_PASSWORD`

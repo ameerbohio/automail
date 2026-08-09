@@ -1,0 +1,98 @@
+# cloud-server — HorizontalPodAutoscaler (Goal K7 / plans/16-kubernetes.md §7).
+#
+# The autoscaler is the payoff of everything before it: it is only correct
+# because the tier is genuinely stateless (Deployment, not StatefulSet), because
+# dispatch is exactly-once across however many replicas exist (Redis Streams
+# consumer group + `SELECT FOR UPDATE NOWAIT`), and because a replica that goes
+# away drains rather than dies (Goal K0). An HPA in front of a tier without
+# those three is a job-duplication machine.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cloud-server
+  labels:
+    app.kubernetes.io/name: cloud-server
+    app.kubernetes.io/component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cloud-server
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          # UTILIZATION IS A PERCENTAGE OF THE `requests.cpu`, NOT OF A CORE.
+          # cloud-server requests 100m, so 60% means "scale when the average
+          # pod is burning more than 60m of CPU". This is why the request in
+          # deployment.yaml had to be sized against THIS goal two goals early:
+          # too large a request and load never crosses the threshold, too small
+          # and the HPA pins at maxReplicas on idle noise.
+          #
+          # The arithmetic that has to keep holding: 8 × 100m = 800m CPU and
+          # 8 × 128Mi = 1Gi at full scale-out, inside the ~24 core / ~10GiB
+          # budget this host has (plans/16-kubernetes.md §2.1). A fully scaled
+          # HPA must schedule, or the demo ends in `Pending` pods.
+          type: Utilization
+          averageUtilization: 60
+  # SCALE UP FAST, SCALE DOWN SLOWLY. Both windows are written out even where
+  # they match the Kubernetes default, because the asymmetry is a deliberate
+  # design decision and an implicit default does not read as one.
+  behavior:
+    scaleUp:
+      # No stabilization: under-capacity is user-visible latency, so the
+      # controller acts on the newest recommendation it has. Bounded instead by
+      # the policies -- at most double, or +4 pods, per 15s sync.
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      # 300s (the Kubernetes default, stated rather than inherited). The
+      # controller takes the MAXIMUM recommendation across this trailing window,
+      # so replicas only fall once five full minutes contain no busy sample.
+      #
+      # Why the asymmetry is right: scaling up too eagerly costs a few pods for
+      # a few minutes; scaling down too eagerly costs an outage on the next
+      # traffic spike, and the pods it removes were the ones absorbing it.
+      # Flapping is also not free here -- every removed replica spends the
+      # Goal K0 drain budget (preStop 5s + up to 20s) on its way out, and takes
+      # its Redis consumer registration with it.
+      #
+      # `make k8s-load` waits this window out rather than shortening it, so the
+      # scale-down in infra/k8s/RESULTS.md is the real production-shaped one.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+      selectPolicy: Max
+# TWO KNOWN INTERACTIONS, BOTH DELIBERATE:
+#
+#  1. `replicas: 3` STAYS IN deployment.yaml AND THIS OBJECT OVERRIDES IT.
+#     The Deployment's replica count and the HPA are two writers of one field;
+#     whoever wrote last wins, so `kubectl apply -k` resets the tier to 3 and
+#     the HPA moves it back within a sync or two. Keeping the number in git is
+#     the deliberate choice: it documents the design size and makes a
+#     cluster-less `kubectl kustomize` render honest. The GitOps alternative
+#     (drop `replicas` from the Deployment so the HPA is the only writer) is
+#     the right move once a reconciler is re-applying continuously, which
+#     nothing here does.
+#
+#  2. minReplicas 2 MEETS PodDisruptionBudget minAvailable 2 (pdb.yaml). At the
+#     HPA's floor the budget allows zero voluntary disruptions, so a node drain
+#     blocks until load or a manual scale raises the replica count. That is the
+#     PDB doing its job -- it refuses to trade the last redundant replica for an
+#     administrator's convenience -- but it does mean `make k8s-failure`
+#     (Goal K6) must scale the tier to 3 before it drains, and its preflight
+#     says so. Whether the floor should instead be 3, or the budget expressed as
+#     a percentage, is an owner call recorded in
+#     docs/study/00-interview-pending-questions.md.
