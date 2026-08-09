@@ -136,8 +136,11 @@ jobs:
         run: |
           bash scripts/k8s/tools.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # REQUIRE_KUBECONFORM makes an absent validator a failure rather than a
+      # warning. This job previously used `kubectl apply --dry-run=client`,
+      # which needs a live API server and so had never actually passed here.
       - name: validate manifests
-        run: make k8s-validate
+        run: REQUIRE_KUBECONFORM=1 make k8s-validate
 
   integration:
     name: Integration (real deps)

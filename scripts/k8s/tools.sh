@@ -65,8 +65,32 @@ install_k3d() {
 	echo "✔ k3d $K3D_VERSION -> $BIN_DIR/k3d (sha256 verified)"
 }
 
+install_kubeconform() {
+	if [ -z "$FORCE" ] && command -v kubeconform >/dev/null 2>&1 &&
+		kubeconform -v 2>/dev/null | grep -qF "$KUBECONFORM_VERSION"; then
+		echo "✔ kubeconform $KUBECONFORM_VERSION already installed ($(command -v kubeconform))"
+		return
+	fi
+	local rel="https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}"
+	echo "→ downloading kubeconform $KUBECONFORM_VERSION"
+	curl -sSfL --max-time 120 -o "$TMP/kubeconform.tar.gz" "$rel/kubeconform-linux-amd64.tar.gz"
+	# Unlike k3d, this release's CHECKSUMS uses plain asset names.
+	curl -sSfL --max-time 60 -o "$TMP/CHECKSUMS" "$rel/CHECKSUMS"
+	local want got
+	want="$(grep -E ' kubeconform-linux-amd64\.tar\.gz$' "$TMP/CHECKSUMS" | awk '{print $1}')"
+	got="$(sha256sum "$TMP/kubeconform.tar.gz" | awk '{print $1}')"
+	if [ -z "$want" ] || [ "$want" != "$got" ]; then
+		echo "✗ kubeconform checksum mismatch (want=${want:-<none found>} got=$got)" >&2
+		exit 1
+	fi
+	tar -xzf "$TMP/kubeconform.tar.gz" -C "$TMP" kubeconform
+	install -m 0755 "$TMP/kubeconform" "$BIN_DIR/kubeconform"
+	echo "✔ kubeconform $KUBECONFORM_VERSION -> $BIN_DIR/kubeconform (sha256 verified)"
+}
+
 install_kubectl
 install_k3d
+install_kubeconform
 
 case ":$PATH:" in
 *":$BIN_DIR:"*) ;;
@@ -75,3 +99,4 @@ esac
 
 kubectl version --client | head -1
 k3d version | head -1
+kubeconform -v
