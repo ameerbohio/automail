@@ -1,6 +1,7 @@
 # The printer, running OUTSIDE the Kubernetes cluster and dialing into it
-# (Goal K5 / plans/16-kubernetes.md §6). Brought up by `make k8s-e2e`
-# (scripts/k8s/e2e.sh); never layered on docker-compose.yml.
+# (Goal K5 / plans/16-kubernetes.md §6). Brought up by `make k8s-e2e` and
+# `make k8s-failure`, both through scripts/k8s/lib-printer.sh; never layered on
+# docker-compose.yml.
 #
 # WHY A STANDALONE FILE AND NOT AN OVERRIDE. Two reasons, both structural:
 #
@@ -27,7 +28,7 @@
 #
 # Compose interpolates on EVERY subcommand, so the K8S_MINIO_HOST_IP guard
 # below binds `down`, `logs` and `ps` as much as `up`. Reaching for one of those
-# by hand, outside `make k8s-e2e`:
+# by hand, outside those targets:
 #   K8S_MINIO_HOST_IP=0.0.0.0 docker compose -f docker-compose.k8s-printer.yml logs
 name: automail-k8s
 
@@ -43,13 +44,13 @@ services:
     # k3d overlay gives the MinIO pod a `hostPort: 9000` inside its k3d NODE
     # container, and this alias maps the signed name onto that node's IP — so
     # the Host header stays `minio:9000` and the signature verifies unchanged.
-    # scripts/k8s/e2e.sh discovers the IP (`kubectl get pod minio-0
+    # scripts/k8s/lib-printer.sh discovers the IP (`kubectl get pod minio-0
     # -o jsonpath='{.status.hostIP}'`) and exports it; there is no sane default,
     # because k3d node IPs are assigned by Docker and move when the network is
     # recreated. See the long note in infra/k8s/overlays/k3d-local for why a
     # NodePort, a k3d port mapping and `kubectl port-forward` all fail here.
     extra_hosts:
-      - "minio:${K8S_MINIO_HOST_IP:?set by scripts/k8s/e2e.sh -- run `make k8s-e2e`}"
+      - "minio:${K8S_MINIO_HOST_IP:?set by scripts/k8s/lib-printer.sh -- run `make k8s-e2e` or `make k8s-failure`}"
     environment:
       MAILBOX_ID: ${DEV_MAILBOX_ID:-00000000-0000-0000-0000-000000000001}
       # Must equal the seeded mailbox_slots.id (scripts/e2e/seed.sh), or the

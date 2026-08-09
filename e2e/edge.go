@@ -1,10 +1,11 @@
-//go:build smoke || k8s
+//go:build smoke || k8s || k8sfail
 
-// The HTTPS-edge plumbing shared by the two suites that drive the product the
+// The HTTPS-edge plumbing shared by the suites that drive the product the
 // way a browser does -- through Traefik, on the routed hostnames, over the
 // self-signed edge certificate. Goal T12's deployment-parity smoke
-// (`deploy_smoke_test.go`, Compose) and Goal K5's cluster E2E (`k8s_test.go`,
-// k3d ingress) differ in where the edge lives and on which port, and in nothing
+// (`deploy_smoke_test.go`, Compose), Goal K5's cluster E2E (`k8s_test.go`) and
+// Goal K6's failure/rollout suite (`k8s_failure_test.go`, both k3d ingress)
+// differ in where the edge lives and on which port, and in nothing
 // else -- so the transport that makes `https://api.automail.local/...` reach it
 // belongs here rather than being written twice.
 package e2e

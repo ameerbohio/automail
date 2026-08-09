@@ -183,6 +183,10 @@ k8s-edge-browser: ## Browser (Playwright) guest flow through the ingress — Goa
 k8s-e2e: ## Printer outside the cluster: job through the ingress to delivered + fan-in — Goal K5
 	@bash scripts/k8s/e2e.sh
 
+.PHONY: k8s-failure
+k8s-failure: ## Pod kill, PDB eviction/drain and rolling update under traffic — Goal K6
+	@bash scripts/k8s/failure-check.sh
+
 .PHONY: k8s-down
 k8s-down: ## Delete the k3d cluster and verify no containers/networks/volumes leak — Goal K1
 	@bash scripts/k8s/down.sh

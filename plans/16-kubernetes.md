@@ -287,6 +287,36 @@ and accept that it exercises an SSR render on every probe.
   `kubernetes.io/tls` Secret referenced by the IngressRoute. Merging them undoes the separation
   c8716b1 deliberately created.
 
+**Exercised in K6 (`make k8s-failure` → `scripts/k8s/failure-check.sh` + `e2e/k8s_failure_test.go`;
+every number in `infra/k8s/RESULTS.md`).** The bullets above stopped being design intentions:
+`maxUnavailable: 0` + readiness + the preStop sleep were measured through a full
+`rollout restart` under continuous traffic with **zero** non-2xx and zero transport errors; the
+PDB allowed one eviction and the API server **refused** the second with `TooManyRequests`; the
+*preferred* anti-affinity let a `kubectl drain` reschedule the evicted replica instead of
+turning the drain into an outage; and an entry orphaned in a deleted pod's PEL came back via
+`XAUTOCLAIM` on a survivor — the first end-to-end demonstration of the crash-recovery path in
+the assembled product, and the concrete thing K6 has that T9 could not.
+
+Four traps that only appear once you try to *measure* any of this, all of which cost a run:
+
+- **A terminating pod keeps `status.phase: Running`** for its whole grace period, so
+  `--field-selector=status.phase=Running` still lists the pods a rollout has already replaced.
+  "Did the tier actually turn over?" has to be answered from `metadata.deletionTimestamp`, which
+  no field selector exposes — fetch JSON and filter client-side.
+- **`kubectl rollout status` returns before the outgoing pods are gone.** Any assertion about
+  cluster-wide bookkeeping they clean up on exit (here: the `dispatchers` consumer group) must
+  *converge*, not sample, or a pod mid-drain reads as a leak.
+- **Do not drain the node running Traefik.** It reschedules fine, but it moves the ingress that
+  every suite reaches the cluster through, and the next scenario's traffic then opens with a
+  burst of EOFs that look exactly like dropped requests. Moving the edge is a real disruption;
+  it is just a different one from "can the app tier be replaced under load".
+- **`docker pause` on the printer does not disconnect it.** The TCP connection stays open, so the
+  cloud pod keeps the socket and stays subscribed to `mailbox:<id>:dispatch` — dispatch goes on
+  succeeding into a process that cannot answer. A paused peer is not a disconnected peer, and
+  nothing below the application can tell the difference. Pausing is still the right instrument
+  for widening a failover window (what removes the subscriber there is the *pod* being deleted);
+  a scenario that needs "no live socket" has to stop the container.
+
 ---
 
 ## 6. The printer boundary — why it is not a workload
