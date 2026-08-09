@@ -738,14 +738,21 @@ One commit.
 
 ## Goal K4 — portal Deployment + ingress
 
-**Status:** pending — **manifests landed and verified; blocked on one acceptance
-clause.** Everything except live SSE status through the edge is done and
-measured (see the Status Log row dated 2026-08-09). The remaining clause fails
-on the **Compose** edge too, so it is a pre-existing product gap rather than a
-Kubernetes regression, and the fix is an owner decision logged in
-`docs/study/00-interview-pending-questions.md`. Re-run
-`make k8s-edge-check && make k8s-edge-browser` after that decision, then flip
-this to `done`.
+**Status:** blocked-on-owner — **manifests landed and verified (b7aa947); one
+acceptance clause unmet.** Everything except live SSE status through the edge is
+done and measured (see the Status Log row dated 2026-08-09). That clause fails on
+the **Compose** edge too, so it is a pre-existing product gap rather than a
+Kubernetes regression: the portal's Next.js SSE pass-through does not relay
+behind any reverse proxy. Fixing it changes portal or edge behaviour, which is an
+owner decision — written up in `docs/study/00-interview-pending-questions.md`
+("SSE does not survive the Traefik edge") and guarded by a `test.fixme` in
+`services/portal/e2e-k8s/ingress.spec.ts`.
+
+**To unblock:** take the SSE decision, apply it, then re-run
+`make k8s-edge-check && make k8s-edge-browser` (browser first — the edge-check
+burst empties the guest rate-limit bucket) and flip this to `done`. K5–K8 are
+**not** gated by this: the printer dials the mTLS NodePort, which K3 already
+proved accepts a certed client and refuses a certless one.
 
 Spec: `plans/16-kubernetes.md` §3. Portal Deployment at `replicas: 2` (ClusterIP
 Service, `CLOUD_API_URL` pointing at the cloud Service). Translate the Compose Traefik
