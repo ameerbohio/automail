@@ -30,16 +30,16 @@ build, and every performance number traceable to a committed run on a named mach
 
 ```mermaid
 flowchart TB
-    B["<b>Sender's browser</b><br/>plaintext exists here"]
-    C["<b>Cloud server</b><br/>wrapped key and metadata only"]
-    S[("<b>Storage and database</b><br/>encrypted bytes and metadata only")]
-    M["<b>Mailbox unit</b><br/>plaintext again, in RAM, never on disk"]
-    P(["<b>Paper</b>"])
+    B["Sender's browser<br/>plaintext exists here"]
+    C["Cloud server<br/>wrapped key and metadata only"]
+    S["Storage and database<br/>encrypted bytes and metadata only"]
+    M["Mailbox unit<br/>plaintext again, in RAM, never on disk"]
+    P["Paper"]
 
-    B -->|"the encrypted document"| S
-    B -->|"the document key, wrapped"| C
-    C -->|"still wrapped"| M
-    S -->|"still encrypted"| M
+    B -->|encrypted document| S
+    B -->|wrapped document key| C
+    C -->|still wrapped| M
+    S -->|still encrypted| M
     M --> P
 ```
 
