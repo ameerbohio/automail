@@ -1,0 +1,234 @@
+# cloud-server — Deployment, 3 replicas (Goal K3 / plans/16-kubernetes.md §3, §5).
+#
+# This is the object the whole track exists for: the stateless tier. Every
+# replica is interchangeable because the state lives in Postgres, Redis and
+# MinIO -- which is why this is a Deployment and the data tier is not.
+#
+# Two things make the replicas safe to run concurrently, and both predate
+# Kubernetes: the Redis Streams consumer group makes dispatch exactly-once
+# across nodes (docs/study/14), and `SELECT FOR UPDATE NOWAIT` is the
+# authoritative double-dispatch guard (docs/study/15). Kubernetes schedules
+# them; it does not make them correct.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloud-server
+  labels:
+    app.kubernetes.io/name: cloud-server
+    app.kubernetes.io/component: api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloud-server
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Capacity never dips below `replicas` during a rollout: a new pod must
+      # be Ready before an old one goes away. The cost is one extra pod's
+      # resources for the duration -- cheap, and the reason the K3 acceptance
+      # can assert zero dropped requests during a restart.
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cloud-server
+        app.kubernetes.io/component: api
+    spec:
+      # 5s preStop + 20s SHUTDOWN_TIMEOUT = 25s of deliberate shutdown, and
+      # the kubelet SIGKILLs at terminationGracePeriodSeconds. 35 leaves 10s of
+      # headroom. IF THIS ARITHMETIC EVER STOPS HOLDING, every guarantee below
+      # is theatre: the process is killed mid-drain, SSE streams are severed
+      # instead of closed, and the Redis consumer is leaked rather than
+      # removed -- exactly the bug Goal K0 fixed. Compose expresses the same
+      # budget as `stop_grace_period: 30s`.
+      terminationGracePeriodSeconds: 35
+      affinity:
+        podAntiAffinity:
+          # PREFERRED, not required: the three replicas spread across nodes so
+          # losing one node cannot take the whole tier, but a single-node
+          # cluster (or a drained one) still schedules rather than sitting
+          # Pending. "Required" would turn a node drain into an outage.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: cloud-server
+      containers:
+        - name: cloud-server
+          image: automail/cloud-server:dev
+          # IfNotPresent, never Always: there is no registry. `k3d image
+          # import` put this image in each node's containerd, and Always would
+          # send the kubelet looking for a registry that does not exist
+          # (ImagePullBackOff). See scripts/k8s/images.sh.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: mtls
+              containerPort: 8443
+          lifecycle:
+            preStop:
+              exec:
+                # THE ENDPOINTS RACE. Pod deletion sends SIGTERM and removes
+                # the pod from the Service's Endpoints *concurrently*, and
+                # kube-proxy/Traefik learn about the removal asynchronously.
+                # Without this sleep the process starts draining while the
+                # load balancer is still sending it new requests. Sleeping
+                # first means the endpoint propagation wins the race, and only
+                # then does the drain begin. (alpine:3.19 base, so `sleep`
+                # exists; a distroless image would need an httpGet preStop.)
+                command: ["sleep", "5"]
+          env:
+            # NODE_ID is the Redis consumer name. main.go already falls back
+            # to os.Hostname() (the pod name in Kubernetes), but setting it
+            # from the downward API makes it a deliberate contract: the
+            # X-Automail-Node header then names a pod you can `kubectl logs`
+            # directly. NOTE this changes on every rollout, which is why Goal
+            # K0's XGROUP DELCONSUMER is load-bearing here and not merely
+            # prior -- without it, each `rollout restart` leaks three
+            # consumers into the `dispatchers` group forever.
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: PORT
+              value: "8080"
+            - name: MTLS_PORT
+              value: "8443"
+            # Explicit rather than relying on the 20s default, so the
+            # arithmetic against terminationGracePeriodSeconds above is
+            # visible in one place.
+            - name: SHUTDOWN_TIMEOUT
+              value: "20"
+            - name: MTLS_CA_CERT_PATH
+              value: /certs/ca-cert.pem
+            - name: MTLS_CLOUD_CERT_PATH
+              value: /certs/cloud-server-cert.pem
+            - name: MTLS_CLOUD_KEY_PATH
+              value: /certs/cloud-server-key.pem
+            - name: JWT_PRIVATE_KEY_PATH
+              value: /certs/jwt-private.pem
+            - name: JWT_PUBLIC_KEY_PATH
+              value: /certs/jwt-public.pem
+            # Credentials by reference only -- the values live in a Secret
+            # built at bootstrap from .env (scripts/k8s/secrets.sh).
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: automail-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: automail-credentials
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: automail-credentials
+                  key: POSTGRES_DB
+            # Kubernetes expands $(VAR) against env vars declared earlier in
+            # this same list, so the DSN is assembled here instead of being a
+            # fourth secret key that could drift from the three above. Host
+            # `postgres` is the headless Service from Goal K2 -- the identical
+            # string Compose uses.
+            - name: DATABASE_URL
+              value: postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)?sslmode=disable
+            # No credential: REDIS_PASSWORD is deliberately not wired up (the
+            # Goal T12 finding), and the Kubernetes manifests carry the same
+            # state as Compose rather than forking the security posture.
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: MINIO_ENDPOINT
+              value: minio:9000
+            - name: MINIO_SECURE
+              value: "false"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: automail-credentials
+                  key: MINIO_ROOT_USER
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: automail-credentials
+                  key: MINIO_ROOT_PASSWORD
+            # The host the BROWSER is told to PUT the ciphertext to. Signed
+            # into the pre-signed URL, so it must be resolvable outside the
+            # cluster -- `minio:9000` is not. Environment-shaped, hence the
+            # ConfigMap; K4 owns reconciling it with the edge port (§8.1).
+            - name: MINIO_PUBLIC_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: automail-config
+                  key: MINIO_PUBLIC_ENDPOINT
+            - name: MINIO_PUBLIC_SECURE
+              valueFrom:
+                configMapKeyRef:
+                  name: automail-config
+                  key: MINIO_PUBLIC_SECURE
+            - name: APP_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: automail-credentials
+                  key: APP_ENCRYPTION_KEY
+          volumeMounts:
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+          # READINESS vs LIVENESS ARE DIFFERENT QUESTIONS (§4.4).
+          #
+          # /healthz checks Postgres and Redis. That is the right readiness
+          # probe -- a pod that cannot reach its dependencies should not get
+          # traffic -- and it is the WRONG liveness probe: a Redis blip would
+          # restart all three pods at once, turning a dependency wobble into a
+          # total outage. /healthz also returns 503 DRAINING during shutdown,
+          # so readiness pulls the pod from Endpoints the moment SIGTERM lands.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # /livez answers only "is this process still serving its mux" -- no
+          # dependency touched, and it deliberately stays 200 while draining
+          # so a graceful shutdown is never mistaken for a wedged process.
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # REQUESTS ARE A PREREQUISITE FOR THE HPA, NOT A NICETY: CPU
+          # utilization is a percentage *of the request*, so without one the
+          # K7 HPA has no denominator. Sized against that goal now, because
+          # getting it wrong is only discovered two goals later --
+          #   8 replicas (K7 maxReplicas) × 100m = 800m CPU  (host: 24 cores)
+          #   8 replicas × 128Mi           = 1.0Gi memory    (host: ~10GiB free,
+          #                                   data tier already requests ~1.5Gi)
+          # so a fully scaled-out HPA still schedules instead of leaving pods
+          # Pending. The limit is 5× the request: enough headroom for a burst,
+          # low enough that load actually moves the utilization number.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: certs
+          secret:
+            secretName: automail-certs
+            # 0400: readable only by the process's own uid (this image runs as
+            # root, so that is uid 0). The private keys in here are the
+            # internal CA's trust chain and the JWT signing key.
+            defaultMode: 0400

@@ -1,0 +1,28 @@
+# PodDisruptionBudget for cloud-server (Goal K3 / plans/16-kubernetes.md §5).
+#
+# A PDB constrains VOLUNTARY disruption only -- `kubectl drain`, node upgrades,
+# the descheduler. It does nothing about a node dying, an OOMKill, or a
+# `kubectl delete pod`; those are involuntary and no budget can veto them.
+# Saying that out loud is the difference between "I ran a rollout" and "I
+# reasoned about voluntary disruption".
+#
+# minAvailable: 2 against replicas: 3 permits exactly one eviction at a time,
+# so draining a node cannot take the API tier below two serving pods.
+#
+# The interaction with Goal K7's HPA is deliberate and worth knowing before it
+# happens: if the HPA has scaled down to 2 replicas, this budget BLOCKS a drain
+# entirely (evicting one would leave 1 < 2). That is the PDB working, not a
+# bug -- Kubernetes is refusing to trade availability for convenience. Record
+# it if K6 hits it rather than raising the number to make the demo smoother.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cloud-server
+  labels:
+    app.kubernetes.io/name: cloud-server
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloud-server

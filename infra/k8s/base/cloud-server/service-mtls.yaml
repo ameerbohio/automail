@@ -1,0 +1,33 @@
+# cloud-server, internal mTLS listener — the printer's dial-in point (Goal K3).
+#
+# WHY A SECOND SERVICE AND NOT A SECOND PORT ON THE FIRST: these two ports have
+# different trust models and different exposure. 8080 is plain HTTP behind the
+# edge; 8443 requires a client certificate signed by the internal CA
+# (tls.RequireAndVerifyClientCert — the handshake is refused before any handler
+# runs). Separating them keeps that boundary legible and lets the overlay
+# expose one outside the cluster without the other following it.
+#
+# ClusterIP here, in the base, because "how does traffic from outside reach
+# this" is an environment question. The k3d overlay patches it to a NodePort on
+# 30843 (the host port frozen into infra/k8s/k3d-cluster.yaml at creation); a
+# cloud overlay would use an internal LoadBalancer or a private link instead.
+#
+# The printer is NOT a workload in this cluster and never will be -- it is
+# software inside a physical mailbox unit that dials out through NAT
+# (plans/16-kubernetes.md §6). This Service is the thing it dials, which is
+# Goal K5's job to prove end to end.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloud-server-mtls
+  labels:
+    app.kubernetes.io/name: cloud-server
+    app.kubernetes.io/component: printer-link
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cloud-server
+  ports:
+    - name: mtls
+      port: 8443
+      targetPort: mtls

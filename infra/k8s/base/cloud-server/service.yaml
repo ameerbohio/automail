@@ -1,0 +1,26 @@
+# cloud-server, public HTTP — ClusterIP (Goal K3).
+#
+# The in-cluster name every other workload uses: the portal's CLOUD_API_URL is
+# http://cloud-server:8080 under Compose and stays exactly that here. Unlike
+# the data tier's headless Services, this one HAS a virtual IP on purpose --
+# kube-proxy round-robins across the three Ready pods, which is what makes
+# `X-Automail-Node` come back with different pod names on repeated requests.
+#
+# Endpoints membership is driven by the readiness probe, so a draining pod
+# (whose /healthz answers 503 DRAINING) leaves this Service before its
+# in-flight work finishes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloud-server
+  labels:
+    app.kubernetes.io/name: cloud-server
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cloud-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

@@ -167,6 +167,10 @@ k8s-apply: ## Apply the k3d overlay (schema ConfigMap + workloads) and wait for 
 k8s-data-check: ## Prove the schema applied and data survives pod deletion — Goal K2 acceptance
 	@bash scripts/k8s/data-check.sh
 
+.PHONY: k8s-cloud-check
+k8s-cloud-check: ## Prove pod spread, Service fan-out and no consumer leak on rollout — Goal K3 acceptance
+	@bash scripts/k8s/cloud-check.sh
+
 .PHONY: k8s-down
 k8s-down: ## Delete the k3d cluster and verify no containers/networks/volumes leak — Goal K1
 	@bash scripts/k8s/down.sh

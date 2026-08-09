@@ -97,6 +97,7 @@ make k8s-images     # docker build both services, k3d image import  (~17 s)
 make k8s-secrets    # namespace + Secrets from infra/certs, infra/traefik and .env
 make k8s-apply      # schema ConfigMap + overlay, wait for Ready  (~20 s)
 make k8s-data-check # schema applied, and data survives pod deletion
+make k8s-cloud-check # pod spread, Service fan-out, no consumer leak on rollout
 make k8s-validate   # kustomize build + client dry-run — needs no cluster, no Docker
 make k8s-down       # delete, then prove no k3d container/network/volume survives
 ```

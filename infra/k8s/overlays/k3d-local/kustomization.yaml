@@ -37,6 +37,15 @@ configMapGenerator:
       # is part of the origin, so K4 must move this value and the CSP
       # `connect-src`, MINIO_PUBLIC_ENDPOINT and /etc/hosts together (§8.1).
       - MINIO_CORS_ORIGIN=https://automail.local
+      # The host cloud-server SIGNS into the pre-signed upload URL -- what the
+      # browser is told to PUT to, not what the server itself talks to. It has
+      # to resolve outside the cluster, so `minio:9000` is wrong here by
+      # construction. Same four-way coupling as above: this, the CORS origin,
+      # the CSP connect-src and /etc/hosts move together or uploads fail with
+      # no server-side error (§8.1). Unresolvable until K4 adds the ingress --
+      # which is why K3's acceptance stays inside the cluster.
+      - MINIO_PUBLIC_ENDPOINT=blob.automail.local
+      - MINIO_PUBLIC_SECURE=true
 
 patches:
   # PIN THE DATA TIER TO THE SERVER NODE.
@@ -60,3 +69,29 @@ patches:
         path: /spec/template/spec/nodeSelector
         value:
           node-role.kubernetes.io/control-plane: "true"
+
+  # EXPOSE THE INTERNAL mTLS LISTENER TO THE PRINTER, WHICH LIVES OUTSIDE THE
+  # CLUSTER (plans/16-kubernetes.md §6). The base keeps this Service ClusterIP
+  # because "how does the outside reach it" is environment-specific.
+  #
+  # 30843 is not a free choice: infra/k8s/k3d-cluster.yaml publishes host
+  # 127.0.0.1:9843 → nodePort 30843, and k3d froze that mapping at cluster
+  # creation. Changing this number means recreating the cluster (and losing
+  # every PVC), so it is pinned in scripts/k8s/versions.env as MTLS_NODE_PORT
+  # and quoted here rather than picked.
+  #
+  # The printer therefore dials wss://localhost:9843 — deliberately, because
+  # the cloud-server cert's SANs are `DNS:cloud-server, DNS:localhost` and
+  # services/printer/mtls.go sets no ServerName. A node IP or
+  # host.docker.internal would fail verification. §6.1 option (a): keep the
+  # existing PKI, choose the name that already verifies. K5 proves it.
+  - target:
+      kind: Service
+      name: cloud-server-mtls
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30843

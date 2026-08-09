@@ -2,10 +2,11 @@
 # Layout and ownership: plans/16-kubernetes.md §3.
 #
 # Populated so far:
-#   K2  data/{postgres,redis,minio}-{statefulset,service}.yaml  ← this goal
+#   K2  data/{postgres,redis,minio}-{statefulset,service}.yaml
+#   K3  cloud-server/{deployment,service,service-mtls,pdb}.yaml  ← this goal
 # Still to come:
-#   K3  cloud-server/{deployment,service,service-mtls,hpa,pdb}.yaml
 #   K4  portal/{deployment,service}.yaml, ingress/{ingressroutes,middlewares,tls}.yaml
+#   K7  cloud-server/hpa.yaml
 #
 # TWO THINGS ARE DELIBERATELY ABSENT FROM THIS TREE, AND ALWAYS WILL BE:
 #
@@ -42,3 +43,7 @@ resources:
   - data/redis-service.yaml
   - data/minio-statefulset.yaml
   - data/minio-service.yaml
+  - cloud-server/deployment.yaml
+  - cloud-server/service.yaml
+  - cloud-server/service-mtls.yaml
+  - cloud-server/pdb.yaml
