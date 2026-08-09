@@ -1,0 +1,72 @@
+# Redis — StatefulSet, 1 replica (Goal K2 / plans/16-kubernetes.md §3, §5).
+#
+# Redis is load-bearing for dispatch *correctness*, not just speed: the
+# `jobs:pending` Stream plus the `dispatchers` consumer group are what make
+# fan-in exactly-once across cloud-server replicas (docs/study/14). It holds
+# state on disk, so it is a StatefulSet for the same reasons as Postgres, and
+# it is equally NOT HA -- no Sentinel, no Cluster (plans/16-kubernetes.md §8).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: queue
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/component: queue
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          # REDIS_PASSWORD IS DELIBERATELY NOT WIRED UP HERE. The Goal T12
+          # deploy audit found it documented in .env.example but connected to
+          # nothing: the server runs without `requirepass` and no consumer's
+          # REDIS_URL carries a password. That gap was left visible rather than
+          # silently fixed, and turning it on is an owner decision logged in
+          # docs/study/00-interview-pending-questions.md. Adding `--requirepass`
+          # only in the Kubernetes manifests would fork the two deployment
+          # targets' security posture, so this carries the Compose state
+          # unchanged: no args, no credential.
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

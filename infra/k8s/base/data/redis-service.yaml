@@ -1,0 +1,18 @@
+# Headless Service for the Redis StatefulSet (Goal K2).
+# Name `redis` on purpose: cloud-server's REDIS_URL is redis://redis:6379/0
+# under Compose and stays byte-identical here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: queue
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

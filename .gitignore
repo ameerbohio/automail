@@ -28,6 +28,14 @@ yarn-error.log*
 # Data volumes / local state
 *.log
 data/
+# ...but the Kubernetes data-tier manifests are source, not local state. The
+# bare `data/` above matches a directory at any depth, so without this
+# exception `infra/k8s/base/data/*.yaml` (the Postgres/Redis/MinIO
+# StatefulSets, Goal K2) is silently untracked -- the kind of miss that only
+# shows up when a clean clone renders an empty overlay. The negation must name
+# the directory: git cannot re-include a file whose parent directory is
+# excluded.
+!infra/k8s/base/data/
 
 # OS / editor
 .DS_Store

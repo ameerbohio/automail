@@ -1,0 +1,24 @@
+# Headless Service for the MinIO StatefulSet (Goal K2).
+#
+# Name `minio`, port 9000: cloud-server's MINIO_ENDPOINT is `minio:9000` under
+# Compose and is unchanged here. The console port rides along so a human can
+# port-forward to it; K4 adds the browser-facing IngressRoute for the API port
+# (the pre-signed PUT), which is a different concern from this in-cluster name.
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: api
+    - name: console
+      port: 9001
+      targetPort: console

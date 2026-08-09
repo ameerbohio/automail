@@ -1,27 +1,44 @@
 # Environment-independent base for the Automail stateless tier.
 # Layout and ownership: plans/16-kubernetes.md §3.
 #
-# Empty on purpose after Goal K1 -- K1 delivers the substrate (cluster, image
-# supply, validation gate), not workloads. The skeleton lands now so
-# `make k8s-validate` has something real to build and so each later goal adds
-# to a settled layout instead of inventing one:
-#
-#   K2  data/{postgres,redis,minio}-statefulset.yaml (+ services, PVCs)
+# Populated so far:
+#   K2  data/{postgres,redis,minio}-{statefulset,service}.yaml  ← this goal
+# Still to come:
 #   K3  cloud-server/{deployment,service,service-mtls,hpa,pdb}.yaml
 #   K4  portal/{deployment,service}.yaml, ingress/{ingressroutes,middlewares,tls}.yaml
 #
-# Secrets are deliberately absent from this tree and always will be: they are
-# created imperatively from infra/certs/ and .env by a Make target (K2), so no
-# PEM or password can ever reach a committed manifest.
+# TWO THINGS ARE DELIBERATELY ABSENT FROM THIS TREE, AND ALWAYS WILL BE:
+#
+#  1. Secrets. They are created imperatively from infra/certs/ and .env by
+#     `make k8s-secrets` (scripts/k8s/secrets.sh), so no PEM or password can
+#     ever reach a committed manifest and gitleaks stays authoritative.
+#     Manifests reference them by name only.
+#  2. The `postgres-schema` ConfigMap. Its content is
+#     services/cloud/db/schema.sql, which lives outside this Kustomize root --
+#     Kustomize refuses to read files above its own directory, and a copy here
+#     would be a second source of truth that drifts from the Compose path.
+#     `scripts/k8s/apply.sh` creates it from the canonical file.
+#
+# The Namespace object is likewise not here: `scripts/k8s/secrets.sh` creates
+# it before anything can be applied into it (a Secret cannot land in a
+# namespace that does not exist yet), so declaring it again would be a second
+# owner of the same object.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 # `labels`, not the deprecated `commonLabels`. includeSelectors stays false on
-# purpose: a Deployment's .spec.selector is immutable after creation, so a
-# label that leaks into selectors can only be changed by deleting the object.
+# purpose: a Deployment's (and StatefulSet's) .spec.selector is immutable after
+# creation, so a label that leaks into selectors can only be changed by
+# deleting the object.
 labels:
   - pairs:
       app.kubernetes.io/part-of: automail
     includeSelectors: false
 
-resources: []
+resources:
+  - data/postgres-statefulset.yaml
+  - data/postgres-service.yaml
+  - data/redis-statefulset.yaml
+  - data/redis-service.yaml
+  - data/minio-statefulset.yaml
+  - data/minio-service.yaml

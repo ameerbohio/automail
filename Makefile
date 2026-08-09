@@ -155,6 +155,18 @@ k8s-up: ## Create the local k3d cluster (1 server + 3 agents) — needs Docker (
 k8s-images: ## Build both service images and import them into the cluster (no registry) — Goal K1
 	@bash scripts/k8s/images.sh
 
+.PHONY: k8s-secrets
+k8s-secrets: ## Create the namespace + Secrets from infra/certs, infra/traefik and .env — Goal K2
+	@bash scripts/k8s/secrets.sh
+
+.PHONY: k8s-apply
+k8s-apply: ## Apply the k3d overlay (schema ConfigMap + workloads) and wait for Ready — Goal K2
+	@bash scripts/k8s/apply.sh
+
+.PHONY: k8s-data-check
+k8s-data-check: ## Prove the schema applied and data survives pod deletion — Goal K2 acceptance
+	@bash scripts/k8s/data-check.sh
+
 .PHONY: k8s-down
 k8s-down: ## Delete the k3d cluster and verify no containers/networks/volumes leak — Goal K1
 	@bash scripts/k8s/down.sh

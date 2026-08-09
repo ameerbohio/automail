@@ -91,16 +91,54 @@ holds (plan §6.1, option (a)).
 ## Usage
 
 ```bash
-make k8s-tools     # once: install pinned k3d + kubectl into ~/.local/bin
-make k8s-up        # create the cluster, wait for 4 Ready nodes  (~26 s)
-make k8s-images    # docker build both services, k3d image import  (~17 s)
-make k8s-validate  # kustomize build + client dry-run — needs no cluster, no Docker
-make k8s-down      # delete, then prove no k3d container/network/volume survives
+make k8s-tools      # once: install pinned k3d + kubectl into ~/.local/bin
+make k8s-up         # create the cluster, wait for 4 Ready nodes  (~26 s)
+make k8s-images     # docker build both services, k3d image import  (~17 s)
+make k8s-secrets    # namespace + Secrets from infra/certs, infra/traefik and .env
+make k8s-apply      # schema ConfigMap + overlay, wait for Ready  (~20 s)
+make k8s-data-check # schema applied, and data survives pod deletion
+make k8s-validate   # kustomize build + client dry-run — needs no cluster, no Docker
+make k8s-down       # delete, then prove no k3d container/network/volume survives
 ```
 
 `make k8s-validate` is also part of `make ci`, so a manifest typo fails on the
 machine that wrote it rather than during a bring-up. It skips cleanly when
 `kubectl` is not installed.
+
+### Secrets are never in the repo (Goal K2)
+
+`make k8s-secrets` creates the `automail` namespace and three Secrets from files
+that are already gitignored — nothing is copied into the repo and no manifest
+contains a credential:
+
+| Secret | Built from | Used by |
+|---|---|---|
+| `automail-credentials` | `.env` (Postgres, MinIO, `APP_ENCRYPTION_KEY`) | data tier now, cloud-server at K3 |
+| `automail-certs` | `infra/certs/` — CA, cloud-server cert/key, JWT keypair | cloud-server at K3 |
+| `automail-edge-tls` | `infra/traefik/edge-{cert,key}.pem` | the ingress at K4 |
+
+Internal mTLS and the browser-facing edge cert are **separate trust domains and
+separate Secrets** — the split commit c8716b1 created deliberately. Re-running
+the target updates the Secrets in place, so rotating a cert is one command.
+
+Prerequisites, and the script fails loudly naming them rather than
+half-creating a Secret: `.env` filled in from `.env.example`, plus
+`infra/certs/gen.sh`, `gen-jwt-keys.sh` and `gen-edge-certs.sh` having been run.
+
+### The Postgres schema, and when it does *not* apply
+
+`make k8s-apply` creates a `postgres-schema` ConfigMap from
+`services/cloud/db/schema.sql` — the same file Compose mounts — and mounts it at
+`/docker-entrypoint-initdb.d/`. That directory runs **only on first init of an
+empty PGDATA**, exactly as under Compose, so editing the schema does nothing to
+an existing PVC. Applying a schema change means destroying the data:
+
+```bash
+RESET_DATA=1 ALLOW_DESTRUCTIVE=1 make k8s-apply
+```
+
+Both variables are required, the same double opt-in `scripts/deploy/smoke.sh`
+uses.
 
 ### There is no registry
 

@@ -1,0 +1,24 @@
+# Headless Service for the Postgres StatefulSet (Goal K2).
+#
+# clusterIP: None means no virtual IP and no kube-proxy load balancing: DNS
+# answers with the pod IPs directly, and the StatefulSet additionally gets a
+# per-ordinal record (postgres-0.postgres.automail.svc.cluster.local). That is
+# the point of "stable identity" -- with one replica the distinction barely
+# shows, but it is the correct object for a StatefulSet and it keeps the name
+# `postgres` resolvable, which is exactly what cloud-server's DATABASE_URL
+# already says under Compose. Same hostname, both targets.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

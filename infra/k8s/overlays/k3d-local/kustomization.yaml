@@ -1,12 +1,12 @@
 # Local k3d overlay -- the environment infra/k8s/k3d-cluster.yaml creates.
 # Spec: plans/16-kubernetes.md §3.
 #
-# What this overlay is for (filled in by K2-K4): NodePorts instead of cloud
-# load balancers, 1Gi PVCs, the printer left outside the cluster in DEV_MODE,
-# and the non-443 edge ports this host is forced onto (§8.1). A future
-# overlays/proxmox/ carries the same base with real hostnames and sizes --
-# base+overlay is the whole point, so environment drift is a diff rather than
-# a fork.
+# What belongs here and not in the base: anything that is true of *this host*
+# rather than of the system. Today that is the data tier's node pinning and
+# the browser-facing origin; K3/K4 add NodePorts and the non-443 edge ports
+# this host is forced onto (§8.1). A future overlays/proxmox/ carries the same
+# base with real hostnames and sizes -- base+overlay is the whole point, so
+# environment drift is a diff rather than a fork.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -23,3 +23,40 @@ images:
     newTag: dev
   - name: automail/portal
     newTag: dev
+
+configMapGenerator:
+  # Non-secret, environment-shaped config. Generated (not a checked-in
+  # ConfigMap manifest) so Kustomize appends a content hash to the name and
+  # rewrites the references in the pod spec -- changing a value therefore
+  # rolls the pods instead of leaving them running the old value forever.
+  - name: automail-config
+    literals:
+      # Origin MinIO accepts the guest's cross-origin ciphertext PUT from.
+      # Matches MINIO_CORS_ORIGIN in .env.example today. K4 owns the port
+      # question: this host publishes the edge on 9443, and a non-default port
+      # is part of the origin, so K4 must move this value and the CSP
+      # `connect-src`, MINIO_PUBLIC_ENDPOINT and /etc/hosts together (§8.1).
+      - MINIO_CORS_ORIGIN=https://automail.local
+
+patches:
+  # PIN THE DATA TIER TO THE SERVER NODE.
+  #
+  # k3s's default StorageClass is `local-path`: node-local directories, bound
+  # WaitForFirstConsumer. The PV that gets provisioned carries a nodeAffinity
+  # to whichever node first ran the pod, permanently. Two consequences:
+  #
+  #   * good -- delete the pod and it reschedules onto that same node with its
+  #     data intact (the K2 acceptance leans on exactly this);
+  #   * bad  -- `kubectl drain` that node and the pod is `Pending` forever.
+  #
+  # K6 drains a node on purpose. Pinning the data tier to the k3d *server*
+  # node makes the three agents freely drainable, which is the only way both
+  # goals can be true at once. The label is k3s's own role label; a cloud
+  # overlay with network-attached storage would delete this patch outright.
+  - target:
+      kind: StatefulSet
+    patch: |-
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value:
+          node-role.kubernetes.io/control-plane: "true"

@@ -1,0 +1,119 @@
+# Postgres — StatefulSet, 1 replica (Goal K2 / plans/16-kubernetes.md §3, §5).
+#
+# WHY A STATEFULSET AND NOT A DEPLOYMENT: this pod owns a durable volume and a
+# stable network identity that other pods dial by name. A Deployment's pods are
+# interchangeable and its rollout can run two pods at once -- two postgres
+# processes over one PVC is corruption, not availability. A StatefulSet gives
+# an ordinal-stable name (postgres-0), a per-ordinal PVC from
+# volumeClaimTemplates, and at-most-one semantics per ordinal.
+#
+# NOT HA. One replica, one volume, no replication -- plans/16-kubernetes.md §8
+# says so out loud. Kubernetes moves the *pod*; it does not make the database
+# redundant. Losing the node that holds the PV loses availability until it
+# returns (see the local-path note in the k3d overlay).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+spec:
+  # Must name the headless Service (postgres-service.yaml) -- that is what
+  # gives postgres-0 its stable DNS record.
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: database
+    spec:
+      containers:
+        - name: postgres
+          # Same tag Compose pins. The data tier is deliberately identical
+          # across both deployment targets so a bug is never "which image".
+          image: postgres:16-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            # Credentials come from the Secret that `make k8s-secrets` builds
+            # from .env at bootstrap. Nothing here is a value -- only a name.
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: automail-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: automail-credentials
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: automail-credentials
+                  key: POSTGRES_DB
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: schema
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          # `pg_isready` is the same check the Compose healthcheck uses. It is
+          # a *process* check (does this postmaster accept connections), not a
+          # dependency check, which is what makes it safe on liveness too --
+          # the §4.4 rule that banned /healthz from cloud-server's liveness.
+          readinessProbe:
+            exec:
+              command:
+                ["sh", "-c", 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                ["sh", "-c", 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            # Slower and more forgiving than readiness: readiness pulling this
+            # pod out of the Service is cheap, restarting the database is not.
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        # The schema ConfigMap is created imperatively from the canonical
+        # services/cloud/db/schema.sql by scripts/k8s/apply.sh -- Kustomize
+        # cannot read a file outside its own root, and a copy under infra/k8s/
+        # would be a second source of truth that silently drifts from the
+        # Compose path. See that script's header.
+        #
+        # SHARP EDGE, inherited from the image and identical under Compose:
+        # /docker-entrypoint-initdb.d runs ONLY on first init of an empty
+        # PGDATA. Editing the ConfigMap does nothing to an existing PVC; a
+        # schema change means wiping the volume (guarded by ALLOW_DESTRUCTIVE,
+        # the way scripts/deploy/smoke.sh guards it).
+        - name: schema
+          configMap:
+            name: postgres-schema
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            # Small by design -- this is the dev-sized default. A proxmox
+            # overlay patches the size up; the k3d overlay keeps it.
+            storage: 1Gi
