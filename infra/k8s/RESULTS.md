@@ -1,5 +1,8 @@
 # Kubernetes track — measured results
 
+*Skimming? [00-PROJECT-SUMMARIES/kubernetes.md](../../00-PROJECT-SUMMARIES/kubernetes.md) is the one-page version.
+This file is the evidence behind it — method, instruments, and the limits of each claim.*
+
 What the cluster actually did, recorded at the moment it did it. Goal K8 turns
 these into resume bullets, and a bullet whose number cannot be traced back to a
 committed run is a bullet that will not survive an interview.
