@@ -10,6 +10,19 @@ Proxmox VM. Written to be followed top-to-bottom exactly once, on a new host.
 | [proxmox-vm-setup.md](proxmox-vm-setup.md) | How do I create and provision the VM itself? (Proxmox wizard, Ubuntu, Docker Engine) |
 | **this doc** | The VM exists — what do I do, in what order, to get a working stack? |
 | [cups-host-setup.md](cups-host-setup.md) | How do I turn on real paper output? (owner-gated, last) |
+| [k8s-host-setup.md](k8s-host-setup.md) | The *other* deploy target — the local k3d cluster (Kubernetes track). Not part of a Proxmox bring-up. |
+
+> **Docker Compose is the deploy target this doc describes, and it remains the
+> supported one.** The Kubernetes manifests under [`infra/k8s/`](../infra/k8s/)
+> are an *additional* target for the stateless tier (cloud-server + portal)
+> only: the printer stays outside the cluster by design
+> ([docs/study/27](study/27-printer-dial-in-outside-the-cluster.md)), and the
+> data tier there is three single-replica StatefulSets on node-local storage.
+> Nothing below changes if you never touch it. Order for that target instead:
+> `make k8s-up && make k8s-images && make k8s-secrets && make k8s-apply`, with
+> the same `.env` and `infra/certs/` this doc provisions — see
+> [k8s-host-setup.md](k8s-host-setup.md) and
+> [plans/16-kubernetes.md](../plans/16-kubernetes.md).
 
 **Verification is automated.** `make deploy-smoke` runs the production-profile
 stack and asserts what a checklist item cannot — the edge certificate and SNI,

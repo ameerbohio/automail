@@ -596,6 +596,9 @@ its own follow-up Q&A block.
 - *"Orchestrated the stateless tier on Kubernetes (k3d/k3s, 4 nodes): rolling updates with zero
   dropped requests, pod anti-affinity, and HPA autoscaling 2→8 replicas under k6 load."*
   → `infra/k8s/base/cloud-server/`, the HPA run record, `scripts/load/submission.js`.
+  **Superseded (K8): `2→8` became `2→7`** in the final wording — 8 is `maxReplicas`, 7 is what the
+  run measured, and quoting the ceiling would be claiming a number `RESULTS.md` does not contain.
+  The draft phrasing is retired in `notes/resume-cheatsheet.md` Appendix B rather than deleted.
 - *"Kept cross-node correctness under orchestration: dispatch fan-in and status fan-out over
   Redis pub/sub, with Streams consumer-group cleanup on pod termination."*
   → `services/cloud/dispatch/`, `services/cloud/link/hub.go`, the DELCONSUMER shutdown path.
@@ -610,3 +613,9 @@ that, the cheat-sheet section is written from memory, which is the one thing
 coordinated through Redis before any of this; Kubernetes schedules it, restarts it, and reacts
 to load. Then name the one thing k8s enabled that Compose could not: surviving a rolling update
 with no dropped requests.
+
+**Done in Goal K8:** `notes/resume-cheatsheet.md` §9 (bullet, defending files, 30-second answer,
+eleven follow-ups led by the trap above) and `docs/study/28-kubernetes-orchestration.md`
+(Deployment vs StatefulSet, readiness vs liveness, the termination sequence, HPA mechanics, and
+the §8 limits written as things to volunteer). Every figure in §9 is quoted from a line in
+`infra/k8s/RESULTS.md`.

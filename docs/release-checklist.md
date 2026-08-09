@@ -48,6 +48,31 @@ The umbrella for the local set: **`make ci`** (fmt-check → lint → test-race 
 | Correlation IDs present end-to-end in a live run | capture logs during E2E; assert `job_id`/`mailbox_id` present, no secret | ⛔ Docker (rides on T8) |
 | Physical print (paper out, `/dev/shm` empty) | submit a job on the mailbox host | ⛔ hardware — owner-blocked Phase 10 |
 
+## Kubernetes target (optional — not required to ship the Compose stack)
+
+The manifests in [`infra/k8s/`](../infra/k8s/) are an **additional** deploy target
+for the stateless tier, not a replacement: every gate above still applies to the
+Compose path, which is what ships. These gates only matter if the cluster is
+being demoed or deployed. `make k8s-validate` is the exception — it is Docker-free,
+already part of `make ci`, and catches a manifest typo on the machine that wrote it.
+
+| Gate | Command | Status |
+|---|---|---|
+| Manifests build + client dry-run + no `:latest` | `make k8s-validate` | Docker-free (part of `make ci`) |
+| Data tier applies, schema present, data survives pod deletion | `make k8s-data-check` | ⛔ cluster (Goal K2) |
+| Pod spread, Service fan-out, no consumer leak on rollout | `make k8s-cloud-check` | ⛔ cluster (Goal K3) |
+| Ingress: 3 hostnames, sniStrict, CSP/presign ports, rate limit | `make k8s-edge-check` + `make k8s-edge-browser` | ⛔ cluster (Goal K4 — one clause open, see below) |
+| Printer outside the cluster reaches `delivered`, fan-in holds | `make k8s-e2e` | ⛔ cluster (Goal K5) |
+| Pod kill, PDB eviction, node drain, rolling update under traffic | `make k8s-failure` | ⛔ cluster (Goal K6) |
+| HPA scales up/down under k6 load vs a single-replica control | `make k8s-load` | ⛔ cluster (Goal K7) |
+
+**Open on this target:** live SSE status does not reach the browser through *any*
+Traefik edge — including Compose's — which is a pre-existing portal gap, not a
+Kubernetes regression. It is an owner decision logged in
+[docs/study/00-interview-pending-questions.md](study/00-interview-pending-questions.md)
+and guarded by a `test.fixme`. Measurements for K6/K7 live in
+[infra/k8s/RESULTS.md](../infra/k8s/RESULTS.md).
+
 ## Go / no-go
 
 - **Local build shippable:** all Docker-free + supply-chain gates green.
