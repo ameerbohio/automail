@@ -1,0 +1,85 @@
+# Demo edge routing: ONE hostname, plain HTTP, path-matched.
+#
+# These replace the base's three Host()-matched HTTPS routes (deleted in
+# kustomization.yaml). The reasoning is infra/compose/demo.yml's, ported —
+# read that file's header for the long form; the three changes are:
+#
+#   1. entryPoints: [web], and no `tls:` block. Cloudflare does real TLS at its
+#      edge, so local TLS is redundant — and dropping it is exactly what spares
+#      a phone the self-signed-certificate warning. It is also why there is no
+#      `automail-edge-tls` reference here: sniStrict on `websecure` would
+#      hard-reject a handshake for a *.trycloudflare.com SNI, since no SAN in
+#      that cert matches it.
+#
+#   2. No Host() matchers. A quick tunnel is assigned a random hostname at
+#      startup, so no committed manifest can name it. Paths are unambiguous
+#      here: /automail/ is the object-storage bucket and nothing else in the
+#      app uses that prefix.
+#
+#   3. Object storage is served from the SAME ORIGIN under /automail/ rather
+#      than its own hostname. This is the load-bearing one: SigV4 signs the
+#      Host header and the path but NOT the scheme, so a URL signed for
+#      https://<tunnel>/automail/... still verifies when Cloudflare delivers it
+#      to MinIO over plain HTTP — provided the Host header survives, which it
+#      does. Same-origin also means the browser skips the CORS preflight
+#      entirely and the CSP's connect-src exception stops being load-bearing
+#      (see the CSP patch in kustomization.yaml).
+#
+# The base's `cloud-server` IngressRoute has NO demo equivalent, deliberately:
+# the browser never contacts the API origin. services/portal/lib/api.ts calls
+# same-origin /api/*, which Next proxies server-side, so an api.* route would
+# only ever be reachable by curl — and there is one hostname to spend.
+#
+# The guest rate limit and secure-headers stay on. This is the configuration
+# most exposed to the internet, so it is the last place to relax them.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: demo-portal
+  labels:
+    app.kubernetes.io/name: portal
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints: [web]
+  routes:
+    # Longer rule wins on Traefik's default priority (rule length), so the
+    # guest endpoints keep their rate limit without an explicit priority —
+    # the same mechanism the base and the Compose labels rely on.
+    #
+    # The limit belongs on THIS origin and not on an API one: the browser only
+    # ever talks to the portal, so a limit anywhere else would see only the
+    # portal pods' addresses and throttle nothing real (Goal T12).
+    - kind: Rule
+      match: PathPrefix(`/api/jobs`) || PathPrefix(`/api/recipients`)
+      services:
+        - name: portal
+          port: 3000
+      middlewares:
+        - name: secure-headers
+        - name: guest-ratelimit
+    - kind: Rule
+      match: PathPrefix(`/`)
+      services:
+        - name: portal
+          port: 3000
+      middlewares:
+        - name: secure-headers
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: demo-minio
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints: [web]
+  routes:
+    # No secure-headers, matching the base and Compose: CSP and frame headers
+    # are meaningless on an S3 API response, and the pre-signed URL is the
+    # authorization.
+    - kind: Rule
+      match: PathPrefix(`/automail/`)
+      services:
+        - name: minio
+          port: 9000

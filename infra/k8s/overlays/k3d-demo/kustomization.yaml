@@ -1,0 +1,112 @@
+# Public-demo overlay: the k3d cluster behind a Cloudflare quick tunnel, so the
+# system is reachable from someone else's phone with real TLS, no hosts file,
+# no port forwarding and no certificate warning. Driven by
+# scripts/k8s/demo-up.sh (`make k8s-demo`).
+#
+# !! This publishes the cluster to the public internet. Read the header of
+# !! scripts/k8s/demo-up.sh for what is and is not protected.
+#
+# BUILT ON k3d-local, NOT ON base. The demo differs from the local cluster in
+# exactly two things — how the edge routes, and what origin the pre-signer
+# names — and everything else it needs is host-shaped detail k3d-local already
+# owns: the data tier's node pinning, the mTLS NodePort the printer dials, the
+# image tags, and (critically) MinIO's hostPort. That last one is not optional
+# here: the dispatch frame's pre-signed GET is signed by cloud-server's
+# INTERNAL client, so its host is `minio:9000` no matter what the browser uses,
+# and the printer still lives outside the cluster. Inheriting means this file
+# is a readable diff rather than a fork that silently loses one of those.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: automail
+
+resources:
+  - ../k3d-local
+  - ingressroutes.yaml
+
+configMapGenerator:
+  # behavior: merge — k3d-local generates this ConfigMap; only the three
+  # origin-shaped values change, and merging keeps its other keys plus the
+  # name-hash rewiring that rolls the pods when a value changes.
+  - name: automail-config
+    behavior: merge
+    literals:
+      # PLACEHOLDER, and it must be. A quick tunnel's hostname does not exist
+      # until cloudflared has connected, so no committed manifest can hold the
+      # real value. scripts/k8s/demo-up.sh overwrites it on the live Deployment
+      # with `kubectl set env` once the hostname is known, which is also what
+      # rolls cloud-server onto it. If you ever see this string in a signed URL,
+      # the script died between apply and rewire.
+      - MINIO_PUBLIC_ENDPOINT=tunnel-hostname-set-at-runtime.invalid
+      # True even though Traefik serves the demo over plain HTTP: this governs
+      # the scheme cloud-server SIGNS INTO the URL the browser is handed, and
+      # the browser reaches Cloudflare over HTTPS. SigV4 does not sign the
+      # scheme, so the request still verifies when it arrives at MinIO as HTTP.
+      - MINIO_PUBLIC_SECURE=true
+      # Deliberately left as the local value: with object storage on the same
+      # origin as the portal, the ciphertext PUT is same-origin, the browser
+      # sends no preflight, and MinIO never consults this. It stays set because
+      # the StatefulSet references the key (a missing key fails the pod), not
+      # because the value matters. That it does NOT need the tunnel hostname is
+      # the whole point of the same-origin routing.
+      - MINIO_CORS_ORIGIN=https://automail.local:9443
+
+patches:
+  # DELETE the base's three Host()-matched HTTPS routes. Kustomize has no
+  # "exclude a resource from the base", so `$patch: delete` is the mechanism —
+  # it removes the object from the rendered output rather than from the base
+  # files. ingressroutes.yaml above supplies the demo replacements.
+  #
+  # All three go, including cloud-server's: see that file's header for why the
+  # API origin has no demo equivalent.
+  - target:
+      kind: IngressRoute
+      name: portal
+    patch: |-
+      $patch: delete
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: portal
+  - target:
+      kind: IngressRoute
+      name: cloud-server
+    patch: |-
+      $patch: delete
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: cloud-server
+  - target:
+      kind: IngressRoute
+      name: minio
+    patch: |-
+      $patch: delete
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: minio
+
+  # DROP THE connect-src EXCEPTION.
+  #
+  # k3d-local widened this to `https://blob.automail.local:9443` because the
+  # ciphertext PUT was cross-origin there. Under the demo's same-origin routing
+  # the PUT goes to the page's own origin, so 'self' covers it — and naming a
+  # host the demo never contacts would be a permission granted for nothing.
+  #
+  # This is the honest version of the §8.1 port cascade: the tunnel collapses
+  # all four coupled values (CSP, CORS origin, presign endpoint, name
+  # resolution) into one hostname on the default port, which is why the demo
+  # needs none of the :9443 bookkeeping the local overlay carries.
+  - target:
+      kind: Middleware
+      name: secure-headers
+    patch: |-
+      - op: replace
+        path: /spec/headers/contentSecurityPolicy
+        value: >-
+          default-src 'self';
+          script-src 'self' 'unsafe-inline';
+          style-src 'self' 'unsafe-inline';
+          img-src 'self' data:;
+          connect-src 'self'

@@ -225,6 +225,56 @@ decision in [cups-host-setup.md](cups-host-setup.md). Same trade the Compose
 `PRINT=host` path already makes; restated because this is the file that turns it
 on for the cluster.
 
+### The public demo (`make k8s-demo`)
+
+The self-signed edge cert means anyone you hand `https://automail.local:9443`
+to gets a browser warning — and worse, the ciphertext PUT to the blob origin is
+a `fetch()`, which **cannot** show an interstitial to click through. So a
+shareable demo needs real TLS, which is what the Cloudflare quick tunnel buys.
+
+```bash
+PRINT=host make k8s-demo     # public URL, real TLS, real paper
+make k8s-demo-down           # tunnel + printer down, local edge restored
+```
+
+The cluster keeps running throughout; `k8s-demo-down` is not `k8s-down`.
+
+[`overlays/k3d-demo`](../infra/k8s/overlays/k3d-demo/) builds on **k3d-local**
+rather than on the base, because everything except the edge is host-shaped
+detail that overlay already owns — node pinning, the mTLS NodePort, image tags,
+and MinIO's `hostPort` (still needed: the dispatch frame's pre-signed GET is
+signed by cloud-server's *internal* client, so its host is `minio:9000`
+regardless of what the browser uses). Three things change:
+
+| | Local | Demo |
+|---|---|---|
+| Entry point | `websecure` + self-signed cert | `web`, plain HTTP — Cloudflare does TLS |
+| Matching | `Host()`, three hostnames | `PathPrefix()`, one hostname |
+| Object storage | `blob.automail.local:9443` | same origin, `/automail/` |
+
+**The same-origin move is the load-bearing one.** SigV4 signs the Host header
+and the path but *not* the scheme, so a URL signed for
+`https://<tunnel>/automail/…` still verifies when Cloudflare delivers it to
+MinIO as plain HTTP. Serving object storage from the page's own origin also
+means the browser sends no CORS preflight and the CSP's `connect-src` exception
+stops being load-bearing — so the demo overlay narrows it back to `'self'`.
+That collapses the whole §8.1 four-value port cascade into one hostname on the
+default port.
+
+**Why it has to be a script.** Everything except one value is in the overlay.
+That value is the tunnel hostname, which Cloudflare assigns only after
+cloudflared connects, and which cloud-server must sign into every upload URL.
+[`demo-up.sh`](../scripts/k8s/demo-up.sh) applies, starts the tunnel, reads the
+hostname from its log, `kubectl set env`s the pre-signer onto it, and lets the
+rollout carry it. The overlay's committed value is a deliberate
+`.invalid` placeholder — if you ever see it in a signed URL, the script died
+between apply and rewire.
+
+`cloudflared` runs as a plain host-networked container pointed at the k3d
+loadbalancer's `9080`, not as a Deployment: it is operator tooling, not part of
+the system, and keeping it out of the manifests means the demo adds no object
+to the cluster that a real deploy would not have.
+
 ### There is no registry
 
 `k3d image import` copies locally built images into every node's containerd, so

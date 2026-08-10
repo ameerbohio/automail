@@ -183,6 +183,14 @@ k8s-edge-browser: ## Browser (Playwright) guest flow through the ingress — Goa
 k8s-e2e: ## Printer outside the cluster: job through the ingress to delivered + fan-in — Goal K5
 	@bash scripts/k8s/e2e.sh
 
+.PHONY: k8s-demo
+k8s-demo: ## Public demo of the cluster behind a Cloudflare tunnel — real TLS, shareable
+	@bash scripts/k8s/demo-up.sh
+
+.PHONY: k8s-demo-down
+k8s-demo-down: ## Kill the tunnel + printer and restore the local edge (cluster survives)
+	@bash scripts/k8s/demo-down.sh
+
 .PHONY: k8s-printer-up
 k8s-printer-up: ## Leave a printer running outside the cluster (PRINT=host for real paper)
 	@bash scripts/k8s/printer-up.sh
