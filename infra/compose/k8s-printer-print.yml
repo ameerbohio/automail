@@ -1,0 +1,57 @@
+# PRINT=host for the KUBERNETES printer: turns the real `lp` call back on and
+# points it at the HOST's cupsd -- the same arrangement the Compose/Proxmox
+# deploy uses (docs/cups-host-setup.md), applied to the printer that dials into
+# the cluster instead of the Compose stack.
+#
+# Layered on infra/compose/k8s-printer.yml, never used alone:
+#
+#   PRINT=host make k8s-printer-up      # persistent: submit from the browser
+#   PRINT=host make k8s-e2e             # one scripted job, then torn down
+#
+# WHY AN OVERRIDE IS FINE HERE, WHEN k8s-printer.yml ITSELF COULD NOT BE ONE.
+# That file has to be standalone because `network_mode: host` cannot un-set the
+# base printer's `networks:` and an override cannot drop its `depends_on`.
+# Neither problem exists going this direction: everything below is an
+# environment value or an added volume, and Compose merges both cleanly. So the
+# mTLS dial URL, the `minio` extra_hosts guard and the slot wiring have exactly
+# one definition rather than two that can drift.
+#
+# ============================== SECURITY =================================
+# With DEV_MODE off the decrypted PDF leaves the printer's tmpfs and enters the
+# CUPS spool. That stays inside the "plaintext only in RAM + tmpfs" invariant
+# (plans/02-security.md) ONLY if the host mounts /var/spool/cups on tmpfs --
+# docs/cups-host-setup.md. On a host that has not done that, plaintext touches
+# ordinary disk for the life of the spool file. This is the same open owner
+# decision the Compose PRINT=host path carries, neither better nor worse; it is
+# restated here because this file is the one that turns it on for the cluster.
+# =========================================================================
+
+services:
+  printer:
+    environment:
+      # `lp` is the ONLY thing DEV_MODE gates. The RSA/AES decrypt, the
+      # /dev/shm write and the unlink-before-status all ran in dev mode too --
+      # so flipping this changes what happens to the plaintext after the
+      # pipeline, not the pipeline.
+      DEV_MODE: "false"
+      # The HOST CUPS queue name -- what `lpstat -p` prints, which is not
+      # necessarily the printer's model name. A wrong value does not fail the
+      # bring-up; it fails every job, one at a time, with the stack looking
+      # healthy. scripts/lib/cups.sh checks it before the container starts and
+      # again from inside the container afterwards, for exactly that reason.
+      PRINTER_NAME: ${PRINTER_NAME:-Canon_MF240}
+      # CUPS_SERVER is deliberately NOT set. Unset, `lp` falls back to the
+      # socket mounted below. infra/compose/demo-print.yml sets it to reach a
+      # containerised cupsd instead; that mode has no equivalent here, because
+      # this container shares the host network namespace and a CUPS container
+      # on the compose network would not be reachable by the name `cups`.
+    volumes:
+      # The host's cupsd. The printer image ships cups-client (`lp`) but no
+      # /etc/cups, so the socket is how it finds a server.
+      #
+      # Compose MERGES volume lists across files: ./infra/certs:/certs:ro from
+      # k8s-printer.yml is still mounted. Do not restate it here.
+      #
+      # Some distros put this at /var/run/cups; on Ubuntu 24.04 (the Proxmox
+      # guest) /var/run is a symlink to /run, so this path is correct there.
+      - /run/cups/cups.sock:/run/cups/cups.sock

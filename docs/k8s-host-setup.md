@@ -173,6 +173,58 @@ what remains unproven is the operator step of provisioning DNS, nothing else.
 Traefik edge, in this deployment or in Compose. See the owner-decision entry in
 `docs/study/00-interview-pending-questions.md`.
 
+### Printing for real from the cluster (`PRINT=host`)
+
+The printer is **not** a pod. It is a mailbox-unit process that lives outside
+the cluster and dials in over mTLS (plan §6), so whether paper comes out is a
+property of that one container and **the cluster needs no changes at all** —
+same manifests, same images, same running pods.
+
+By default it runs in `DEV_MODE`: the RSA/AES decrypt, the `/dev/shm` write and
+the unlink-before-status all happen, only the physical `lp` call is skipped.
+That is what the K5/K6 acceptance criteria assume, so it stays the default.
+
+```bash
+PRINT=host make k8s-printer-up     # real paper via the host's cupsd
+make k8s-printer-up                # DEV_MODE (default): "delivered", no paper
+make k8s-printer-down
+PRINT=host make k8s-e2e            # one scripted job, printed, then torn down
+```
+
+`PRINT=host` layers [`infra/compose/k8s-printer-print.yml`](../infra/compose/k8s-printer-print.yml)
+onto the standalone printer file: `DEV_MODE=false`, `PRINTER_NAME`, and
+`/run/cups/cups.sock` mounted. It is the same arrangement
+[cups-host-setup.md](cups-host-setup.md) sets up for the Compose deploy, and it
+reuses the host queue that path already needs — nothing new to configure on the
+host if `PRINT=host bash scripts/demo/up.sh` already prints.
+
+Two checks guard it, shared with the Compose demo in `scripts/lib/cups.sh`
+because a broken print path does **not** fail the bring-up — the stack comes up
+healthy and then every job fails one at a time, which reads as an application
+bug:
+
+1. **Before** anything starts: the host has a `cupsd` and a queue by that name.
+2. **After** the container starts: `lp`'s own client *inside the container* can
+   see the queue. A queue on the host does not prove the container can reach
+   it, and the socket mount is exactly the hop that breaks.
+
+**Why `make k8s-printer-up` exists separately from `make k8s-e2e`:** e2e starts
+a printer, drives one scripted job and tears it down. Submitting from a browser
+needs a printer that is still there afterwards.
+
+**The slot fills after 5 jobs.** Occupancy lives in the printer *process*
+(`newSlotState`: `Current: 0, Max: 5`) and only ever increments — it resets when
+the process restarts, not when mail is collected. Job 6 sits in `queued` with
+nothing logged as an error, because the cloud's eligibility check correctly sees
+a full mailbox. `make k8s-printer-down && make k8s-printer-up` clears it.
+
+**Security.** With `DEV_MODE=false` the decrypted PDF leaves the printer's tmpfs
+and enters the CUPS spool. That stays inside the "plaintext only in RAM+tmpfs"
+invariant *only* if the host mounts `/var/spool/cups` on tmpfs — the open owner
+decision in [cups-host-setup.md](cups-host-setup.md). Same trade the Compose
+`PRINT=host` path already makes; restated because this is the file that turns it
+on for the cluster.
+
 ### There is no registry
 
 `k3d image import` copies locally built images into every node's containerd, so

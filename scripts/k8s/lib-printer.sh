@@ -19,12 +19,33 @@
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/k8s/versions.env
 source "$ROOT/scripts/k8s/versions.env"
+# shellcheck source=scripts/lib/cups.sh
+source "$ROOT/scripts/lib/cups.sh"
 
 # Absolute paths, not relative: the Go drivers run from ./e2e (its own module),
 # so a caller's EXIT trap fires with that as its cwd and a relative -f would
 # silently fail to find the file — leaving the printer container running after
 # every run.
 PRINTER_COMPOSE=(docker compose --project-directory "$ROOT" -f "$ROOT/infra/compose/k8s-printer.yml")
+
+# PRINT=host layers the real-printing override: DEV_MODE off, the host's CUPS
+# socket mounted, `lp` actually called. Anything else (including unset) leaves
+# the printer in DEV_MODE, which is what the K5/K6 acceptance criteria assume —
+# they assert on job status and the /dev/shm wipe, neither of which needs paper.
+#
+# Read at SOURCE time, so a caller must export PRINT before sourcing this file.
+# That is deliberate: PRINTER_COMPOSE is what printer_down uses, and a teardown
+# built from a different file list than the bring-up would leave the container
+# running.
+PRINT_MODE="${PRINT:-}"
+if [ "$PRINT_MODE" = "host" ]; then
+	PRINTER_COMPOSE+=(-f "$ROOT/infra/compose/k8s-printer-print.yml")
+fi
+# Matches scripts/demo/up.sh: exported so Compose interpolation sees the same
+# value this script checked, rather than falling through to .env behind its back.
+PRINTER_NAME="${PRINTER_NAME:-Canon_MF240}"
+export PRINTER_NAME
+
 PRINTER_CONTAINER=automail-k8s-printer
 MAILBOX_ID="${DEV_MAILBOX_ID:-00000000-0000-0000-0000-000000000001}"
 # Set by start_printer; the log scan in find_socket_owner is bounded by it so a
@@ -59,6 +80,14 @@ preflight_cluster() {
 		"make k8s-up && make k8s-images && make k8s-secrets && make k8s-apply"
 	kc rollout status deploy/cloud-server --timeout=120s >/dev/null
 	kc rollout status statefulset/minio --timeout=120s >/dev/null
+	# Before anything slow starts, not after: a missing queue does not fail the
+	# bring-up, it fails every job afterwards. The cluster is untouched by this
+	# check — the printer is the only thing PRINT=host changes.
+	if [ "$PRINT_MODE" = "host" ]; then
+		cups_preflight_host "$PRINTER_NAME" ||
+			fail "host CUPS is not usable (see above)" "or drop PRINT=host to run the printer in DEV_MODE"
+		echo "✔ host CUPS reachable, queue '$PRINTER_NAME' present"
+	fi
 }
 
 # resolve_minio_host exports K8S_MINIO_HOST_IP, the address the printer maps
@@ -94,6 +123,16 @@ start_printer() {
 		"${PRINTER_COMPOSE[@]}" up -d >/dev/null
 	else
 		"${PRINTER_COMPOSE[@]}" up -d --build >/dev/null
+	fi
+	# The host-side preflight proved a queue exists; this proves THIS container
+	# can reach it through the mounted socket. Tear down on failure rather than
+	# leaving a printer that accepts dispatches it can only fail.
+	if [ "$PRINT_MODE" = "host" ]; then
+		cups_verify_container "$PRINTER_NAME" "${PRINTER_COMPOSE[@]}" || {
+			printer_down
+			fail "the printer container cannot reach the host CUPS queue" \
+				"check that /run/cups/cups.sock is a socket and readable by the container"
+		}
 	fi
 }
 

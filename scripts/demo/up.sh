@@ -78,39 +78,23 @@ case "${PRINT:-}" in
         ;;
 esac
 
-# preflight_host_cups only applies to PRINT=host: no cupsd on the host means
-# nothing downstream can work, and saying so before building is much clearer.
-preflight_host_cups() {
-  if [ -d /run/cups/cups.sock ]; then
-    fail "/run/cups/cups.sock is a DIRECTORY, not a socket -- Docker auto-created it because no cupsd was running" \
-         "sudo rmdir /run/cups/cups.sock && sudo systemctl start cups"
-  fi
-  [ -S /run/cups/cups.sock ] || fail \
-    "no CUPS socket at /run/cups/cups.sock -- there is no print server on this host" \
-    "sudo apt install -y cups cups-client && sudo systemctl start cups   (docs/cups-host-setup.md), or use PRINT=1 for the containerised CUPS"
-  command -v lpstat >/dev/null 2>&1 || return 0
-  lpstat -p "$PRINTER_NAME" >/dev/null 2>&1 || fail \
-    "cupsd is running but has no queue named '${PRINTER_NAME}'" \
-    "run \`lpstat -p -d\` to see the real queue name, then re-run with PRINTER_NAME=<name>"
-}
+# The two CUPS checks live in scripts/lib/cups.sh because the Kubernetes
+# printer (scripts/k8s/lib-printer.sh) needs exactly the same two, for exactly
+# the same reason: a broken print path does not fail the bring-up, it fails
+# every job afterwards. They print their own diagnosis and return non-zero; the
+# wrapping below is this script's cleanup obligation, which the other caller
+# does not share.
+# shellcheck source=scripts/lib/cups.sh
+source scripts/lib/cups.sh
 
-# verify_container_can_print runs AFTER start and is the definitive check for both
-# modes: a queue existing somewhere does not prove the PRINTER CONTAINER can reach
-# it, and that hop (socket mount, or CUPS_SERVER over the network) is exactly what
-# breaks. Asking lp's own client inside the container tests the real path a job
-# will take.
+# verify_container_can_print applies to BOTH print modes -- a queue existing
+# somewhere does not prove the PRINTER CONTAINER can reach it, whether the hop
+# is the socket mount (PRINT=host) or CUPS_SERVER over the network (PRINT=1).
+# On failure the stack comes down: a demo that accepts jobs it can only fail is
+# worse than no demo.
 verify_container_can_print() {
-  local i
-  for i in $(seq 1 30); do
-    if "${COMPOSE[@]}" exec -T printer lpstat -p "$PRINTER_NAME" >/dev/null 2>&1; then
-      echo "   printer container can reach CUPS queue '${PRINTER_NAME}'"
-      return 0
-    fi
-    sleep 1
-  done
-  echo "!! the printer CONTAINER cannot see queue '${PRINTER_NAME}'" >&2
-  "${COMPOSE[@]}" exec -T printer lpstat -p 2>&1 | head -5 >&2 || true
-  echo "   every job would fail instead of printing, so the stack is being torn down." >&2
+  cups_verify_container "$PRINTER_NAME" "${COMPOSE[@]}" && return 0
+  echo "   the stack is being torn down." >&2
   "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
   exit 1
 }
@@ -123,7 +107,11 @@ export TRAEFIK_HTTPS_PORT="${TRAEFIK_HTTPS_PORT:-8443}"
 
 echo "==> [1/6] Preflight"
 ensure_docker
-[ "${PRINT:-}" = "host" ] && preflight_host_cups && echo "   host CUPS reachable"
+if [ "${PRINT:-}" = "host" ]; then
+  cups_preflight_host "$PRINTER_NAME" ||
+    fail "host CUPS is not usable (see above)" "or use PRINT=1 for the containerised CUPS"
+  echo "   host CUPS reachable"
+fi
 bash scripts/e2e/bootstrap.sh >/dev/null
 if docker volume inspect "$(basename "$ROOT")_pg_data" >/dev/null 2>&1 \
    && [ "${ALLOW_DESTRUCTIVE:-}" != "1" ]; then
