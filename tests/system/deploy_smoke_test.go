@@ -16,7 +16,7 @@
 //
 // Run it with `make deploy-smoke`, never bare `go test`: scripts/deploy/smoke.sh
 // brings the stack up, seeds the fixture, and sets the env knobs below.
-package e2e
+package system
 
 import (
 	"crypto/tls"

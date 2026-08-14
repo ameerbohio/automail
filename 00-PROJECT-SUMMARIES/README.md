@@ -3,8 +3,9 @@
 **You are in the right place.** This folder is the short version of the whole project, written for
 someone who has a few minutes, not an afternoon.
 
-Four pages. **About a minute each.** Every claim on them links to the code, the test, or the
-recorded run behind it — nothing here asserts something the repository cannot show.
+Four pages. **About a minute each.** Every claim on them carries a **see** pointer to the code, the
+test, or the recorded run behind it — nothing here asserts something the repository cannot show, and
+you can check any single line without reading the rest.
 
 | Read this | If you care about |
 |---|---|
@@ -25,6 +26,6 @@ New to the project? The [main README](../README.md) has the architecture diagram
 
 | | |
 |---|---|
-| **The why behind each decision** | [`docs/study/`](../docs/study/) — 28 explainers, including the trade-offs that were rejected |
+| **The why behind each decision** | [`docs/study/`](../docs/study/) — 31 explainers, including the trade-offs that were rejected |
 | **The specifications** | [`plans/`](../plans/) — 16 design docs, written *before* the code |
 | **The receipts** | [`infra/k8s/RESULTS.md`](../infra/k8s/RESULTS.md) (measured cluster behaviour), [`scripts/load/baseline.json`](../scripts/load/baseline.json) (committed load baseline), [`docs/accepted-risks.md`](../docs/accepted-risks.md) (risks deliberately accepted, with re-review triggers) |

@@ -154,7 +154,7 @@ echo "==> [4/5] Seeding the fixture"
 E2E_COMPOSE_FILES="-f docker-compose.yml -f infra/compose/deploy-smoke.yml" bash scripts/e2e/seed.sh
 
 echo "==> [5/5] Driving the production profile through the HTTPS edge"
-cd e2e
+cd tests/system
 E2E_REPO_ROOT="$ROOT" \
 E2E_COMPOSE_OVERRIDE="infra/compose/deploy-smoke.yml" \
 SMOKE_HTTPS_PORT="$TRAEFIK_HTTPS_PORT" \

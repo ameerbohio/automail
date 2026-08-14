@@ -12,7 +12,7 @@
 // alone -- an unhandled SIGTERM also closes the connection instantly -- so the
 // assertion is on the wire content: a `: draining` comment written by the
 // handler, then a clean EOF. A killed process cannot produce that.
-package e2e
+package system
 
 import (
 	"bufio"

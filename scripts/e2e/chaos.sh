@@ -79,7 +79,7 @@ PG_DB="$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)"
 PG_PASSWORD="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
 
 echo "==> Running the chaos driver"
-cd e2e
+cd tests/system
 E2E_OWNER_URL="$OWNER_URL" \
 E2E_NONOWNER_URL="$NONOWNER_URL" \
 E2E_REPO_ROOT="$ROOT" \

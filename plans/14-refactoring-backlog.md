@@ -277,7 +277,7 @@ rather than letting it set.
 > does `toHaveText("delivered")` against `textContent`, exact match — do not add
 > a second `<strong>` inside `.status`); the literal text `"Current status:"` must
 > remain visible in one element; the button name must still match
-> `/Track|Reconnect/` on `/track`. See `services/portal/e2e/{guest,account}.spec.ts`.
+> `/Track|Reconnect/` on `/track`. See `services/portal/tests/browser/{guest,account}.spec.ts`.
 
 **Acceptance:** `cd services/portal && npx tsc --noEmit -p tsconfig.json &&
 npm test && npm run build` green. Then verify the e2e-observable markup without

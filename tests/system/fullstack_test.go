@@ -31,8 +31,8 @@
 // The crypto/submit/stream/docker primitives live in harness.go (shared with the
 // Goal T9 chaos suite). See infra/compose/full.yml for why the two nodes are
 // named replicas rather than `--scale cloud-server=2`, and
-// docs/study/17-testing-strategy.md.
-package e2e
+// docs/study/30-testing-strategy.md.
+package system
 
 import (
 	"bytes"

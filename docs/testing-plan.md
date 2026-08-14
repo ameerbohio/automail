@@ -350,7 +350,7 @@ Tasks:
   baseline within tolerance; secrets rotated out of any fixture; `DEV_MODE=false`
   path smoke-tested (as far as possible without the physical CUPS printer — the
   Phase 10 owner-blocked boundary).
-- **Study doc:** add `docs/study/17-testing-strategy.md` explaining the pyramid,
+- **Study doc:** add `docs/study/30-testing-strategy.md` explaining the pyramid,
   why fakes vs real dependencies, and how the security invariants are enforced —
   per the `docs/study/` deliverable convention.
 

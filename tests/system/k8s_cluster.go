@@ -15,7 +15,7 @@
 // are miserable to parse and change shape between versions. A three-line Lua
 // script flattens the same reply into `field field field` lines at the source,
 // so the parsing here cannot drift from the server's formatting.
-package e2e
+package system
 
 import (
 	"encoding/json"

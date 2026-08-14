@@ -6,7 +6,7 @@
 #
 # WHAT THIS SCRIPT OWNS AND WHAT THE GO DRIVER OWNS. Everything that needs
 # `kubectl` or `docker` lives here (most of it in scripts/k8s/lib-printer.sh,
-# shared with the Goal K6 failure suite); the driver (e2e/k8s_test.go, build
+# shared with the Goal K6 failure suite); the driver (tests/system/k8s_test.go, build
 # tag `k8s`) is pure HTTP against addresses this script resolves and exports.
 # That split is not cosmetic — §6.2 says the goal must *state* how it targets a
 # specific pod when a Service refuses to be addressed per-pod, and the answer
@@ -81,7 +81,7 @@ echo "✔ non-owner pod $non_owner addressable at http://127.0.0.1:$FORWARD_PORT
 
 # --- 6. drive it ----------------------------------------------------------
 echo "==> Running the Kubernetes E2E driver"
-cd e2e
+cd tests/system
 E2E_REPO_ROOT="$ROOT" \
 	E2E_PRINTER_CONTAINER="$PRINTER_CONTAINER" \
 	K8S_EDGE_HTTPS_PORT="$EDGE_HTTPS_PORT" \

@@ -8,7 +8,7 @@
 // differ in where the edge lives and on which port, and in nothing
 // else -- so the transport that makes `https://api.automail.local/...` reach it
 // belongs here rather than being written twice.
-package e2e
+package system
 
 import (
 	"context"

@@ -11,7 +11,7 @@ import { defineConfig, devices } from "@playwright/test";
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 
 export default defineConfig({
-  testDir: "./e2e",
+  testDir: "./tests/browser",
   // Serial: the suites share one seeded database, and history/admin row
   // assertions reason about how many jobs exist, so parallel workers would
   // race. Correctness over speed for a handful of end-to-end journeys.

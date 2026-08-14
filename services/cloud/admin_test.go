@@ -1,7 +1,7 @@
 package main
 
-// Phase 9 tests for the ops dashboard (GET /admin/summary, /admin/jobs,
-// /admin/mailboxes) and the admin-role guard. Same harness as the Phase 5/8
+// Ops dashboard (GET /admin/summary, /admin/jobs, /admin/mailboxes) and the
+// admin-role guard -- roadmap Phase 9. Same harness as the stream and account
 // tests: the real sqlc query layer over the fake database/sql driver
 // (dbfake_test.go), miniredis for the printer-state cache, and httptest for the
 // role middleware -- no Postgres, no real Redis server.

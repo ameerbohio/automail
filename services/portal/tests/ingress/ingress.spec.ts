@@ -4,7 +4,7 @@ import {
   PLAINTEXT_MARKER,
   RECIPIENT_QUERY,
   RECIPIENT_MASKED,
-} from "../e2e/helpers";
+} from "../browser/helpers";
 
 // Goal K4: the guest flow in a REAL BROWSER through the cluster's Traefik
 // ingress — the half of the acceptance `curl` cannot cover, because a CSP

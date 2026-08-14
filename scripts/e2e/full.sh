@@ -77,7 +77,7 @@ fi
 E2E_COMPOSE_FILES="-f docker-compose.yml -f infra/compose/full.yml" bash scripts/e2e/seed.sh
 
 echo "==> Running the full-system Go driver"
-cd e2e
+cd tests/system
 E2E_OWNER_URL="$OWNER_URL" \
 E2E_NONOWNER_URL="$NONOWNER_URL" \
 E2E_REPO_ROOT="$ROOT" \

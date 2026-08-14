@@ -285,9 +285,11 @@ Full first-deploy walkthrough: [docs/deploy-checklist.md](docs/deploy-checklist.
 | [`services/cloud/`](services/cloud/) | Go cloud server: API, dispatch, printer-link hub, auth |
 | [`services/printer/`](services/printer/) | Go printer microservice, the only place plaintext exists |
 | [`services/portal/`](services/portal/) | Next.js sender portal (browser-side encryption) |
+| [`tests/system/`](tests/system/) | Tests that drive the **assembled product** from outside: full lifecycle, chaos, deploy smoke, shutdown, and two Kubernetes suites. [Which suite proves what](tests/system/README.md). Per-service tests live next to their code; the portal's browser tests are in [`services/portal/tests/`](services/portal/tests/) |
 | [`docker-compose.yml`](docker-compose.yml) | The deployment. `docker compose up -d --build` needs no arguments |
 | [`infra/compose/`](infra/compose/) | Overlays on top of it: demo, test profiles, load harness. [What each one is for](infra/compose/README.md) |
 | [`infra/k8s/`](infra/k8s/) | Kubernetes manifests and [measured results](infra/k8s/RESULTS.md) |
+| [`scripts/`](scripts/) | Everything `make` shells out to, grouped by purpose: `e2e/`, `deploy/`, `k8s/`, `load/`, `demo/`, `shutdown/` |
 | [`docs/study/`](docs/study/) | 31 deep explainers, the *why* behind each decision |
 
 ## Note on the numbers

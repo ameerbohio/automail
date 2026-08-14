@@ -142,7 +142,7 @@ The browser E2E above proves the product from a user's seat, but it runs a
 single cloud node, so it can't exercise the design's most interview-relevant
 claim: that the cloud scales horizontally because Redis — not any one process —
 is the dispatch fan-in and status fan-out backbone. Part 5 / `make test-e2e-full`
-closes that gap with a standalone Go driver (`e2e/`, zero external deps — it just
+closes that gap with a standalone Go driver (`tests/system/`, zero external deps — it just
 speaks the public HTTP contract and the same crypto wire format the browser uses)
 against a **two-node** stack (`infra/compose/full.yml`).
 
@@ -185,7 +185,7 @@ the Part 3 contract test, so nothing is lost by encrypting in Go.
 ## Resilience & chaos: killing each moving part
 
 Everything above proves the system works when the parts stay up. `make chaos`
-(`scripts/e2e/chaos.sh` → `e2e/chaos_test.go`, build tag `chaos`) proves it
+(`scripts/e2e/chaos.sh` → `tests/system/chaos_test.go`, build tag `chaos`) proves it
 *recovers* when they don't. It reuses the two-node full-system stack and, in one
 run, kills each moving part in turn — Redis, Postgres, the socket-owning cloud
 node, the printer — asserting two properties after every kill.
@@ -422,6 +422,6 @@ Naming that boundary honestly is part of the strategy.
 - [docs/testing-plan.md](../testing-plan.md) — the executable spec this doc narrates
 - [Makefile](../../Makefile) — all `make` targets referenced above
 - [.github/workflows/ci.yml](../../.github/workflows/ci.yml) — CI gates
-- [e2e/](../../e2e/) — `harness.go`, `fullstack_test.go` (`//go:build e2e`), `chaos_test.go` (`//go:build chaos`), `deploy_smoke_test.go` (`//go:build smoke`)
+- [tests/system/](../../tests/system/) — `harness.go`, `fullstack_test.go` (`//go:build e2e`), `chaos_test.go` (`//go:build chaos`), `deploy_smoke_test.go` (`//go:build smoke`)
 - [docs/deploy-checklist.md](../deploy-checklist.md), [docs/release-checklist.md](../release-checklist.md), [docs/runbook.md](../runbook.md)
 - [scripts/load/baseline.json](../../scripts/load/baseline.json) — committed load baseline

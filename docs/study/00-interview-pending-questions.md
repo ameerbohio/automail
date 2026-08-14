@@ -246,7 +246,7 @@ Traefik response buffering/`flushInterval` on that router; making the portal
 route pipe explicitly rather than handing Next a `ReadableStream`; or having the
 browser stream from `api.automail.local` directly (which needs a CSP
 `connect-src` change and a CORS story). Guard for whichever wins:
-`services/portal/e2e-k8s/ingress.spec.ts` carries a `test.fixme` naming exactly
+`services/portal/tests/ingress/ingress.spec.ts` carries a `test.fixme` naming exactly
 this.
 Answer: _(to be filled in)_
 

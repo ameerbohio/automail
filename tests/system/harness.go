@@ -19,7 +19,7 @@
 // published port, and swaps in a transport that trusts the self-signed edge cert
 // and maps the routed hostnames to the published Traefik port (see
 // deploy_smoke_test.go's TestMain). That keeps this file protocol-agnostic.
-package e2e
+package system
 
 import (
 	"bufio"

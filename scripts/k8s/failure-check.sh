@@ -2,7 +2,7 @@
 # Goal K6 acceptance: the failure and rollout behaviour that Compose cannot
 # express. Spec: plans/16-kubernetes.md §5, §8. Run with `make k8s-failure`.
 #
-# Three scenarios, all driven by e2e/k8s_failure_test.go (build tag `k8sfail`):
+# Three scenarios, all driven by tests/system/k8s_failure_test.go (build tag `k8sfail`):
 #
 #   1. delete the pod holding the printer's socket — the printer redials the
 #      NodePort and lands on a SURVIVING pod, and jobs submitted while no
@@ -81,7 +81,7 @@ PG_PASSWORD="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
 
 # --- 5. drive it ----------------------------------------------------------
 echo "==> Running the Kubernetes failure/rollout driver"
-cd e2e
+cd tests/system
 E2E_REPO_ROOT="$ROOT" \
 	E2E_PRINTER_CONTAINER="$PRINTER_CONTAINER" \
 	E2E_PG_USER="$PG_USER" \

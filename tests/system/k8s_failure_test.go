@@ -49,7 +49,7 @@
 // Run with `make k8s-failure`, never bare `go test`: scripts/k8s/failure-check.sh
 // seeds the cluster, starts the printer outside it, resolves the socket owner
 // and sets every env knob below.
-package e2e
+package system
 
 import (
 	"fmt"
@@ -631,7 +631,7 @@ func writeResults(t *testing.T) {
 	var b strings.Builder
 	b.WriteString(body[:i+len(resultsBegin)])
 	b.WriteString("\n\nMeasured by `make k8s-failure` (`scripts/k8s/failure-check.sh` →\n")
-	b.WriteString("`e2e/k8s_failure_test.go`), " + verdict + ".\n\n")
+	b.WriteString("`tests/system/k8s_failure_test.go`), " + verdict + ".\n\n")
 	for _, l := range lines {
 		b.WriteString(l + "\n")
 	}

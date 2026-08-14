@@ -5,7 +5,7 @@
 # Everything here is driven with `curl --resolve`, which is how every existing
 # suite reaches the edge — /etc/hosts has no *.automail.local entries on this
 # host and adding them needs root. The browser half of the acceptance lives in
-# services/portal/e2e-k8s/ (see `make k8s-edge-browser`), because a CSP
+# services/portal/tests/ingress/ (see `make k8s-edge-browser`), because a CSP
 # violation only exists in a browser.
 #
 # Checks, in order:

@@ -155,7 +155,7 @@ phase_b() {
   E2E_COMPOSE_FILES="-f docker-compose.yml -f infra/compose/full.yml" bash scripts/e2e/seed.sh
 
   echo "==> Running the shutdown driver"
-  ( cd e2e && \
+  ( cd tests/system && \
     E2E_OWNER_URL="http://localhost:8080" \
     E2E_REPO_ROOT="$ROOT" \
     E2E_COMPOSE_OVERRIDE="infra/compose/full.yml" \

@@ -26,7 +26,7 @@
 // Run it with `make k8s-e2e`, never bare `go test`: the script seeds the
 // cluster's Postgres, starts the printer, resolves the owner/non-owner pods and
 // sets every env knob below.
-package e2e
+package system
 
 import (
 	"fmt"

@@ -22,7 +22,7 @@ The blocks between the `BEGIN`/`END` markers are written by the runs themselves
 
 ## Goal K6 — failure and rollout behaviour
 
-Command: `make k8s-failure` (`scripts/k8s/failure-check.sh` → `e2e/k8s_failure_test.go`,
+Command: `make k8s-failure` (`scripts/k8s/failure-check.sh` → `tests/system/k8s_failure_test.go`,
 build tag `k8sfail`). It runs against a cluster brought up by `make k8s-up &&
 make k8s-images && make k8s-secrets && make k8s-apply`, with the printer outside
 the cluster in its own Compose project, exactly as Goal K5 left it.
@@ -62,7 +62,7 @@ or the printer's own logic is modified or stubbed.
 <!-- BEGIN K6 MEASUREMENTS -->
 
 Measured by `make k8s-failure` (`scripts/k8s/failure-check.sh` →
-`e2e/k8s_failure_test.go`), all four scenarios passed.
+`tests/system/k8s_failure_test.go`), all four scenarios passed.
 
 - Run: `2026-08-09T02:29:51-04:00` against k3d cluster `automail`, k3s `v1.33.13+k3s2`.
 - Socket owner `cloud-server-648788c45b-rt4vb` deleted; the last subscriber on `mailbox:00000000-0000-0000-0000-000000000001:dispatch` disappeared **10.6s** after the delete (preStop 5s + graceful drain, so this is the shutdown budget being spent, not a hang).

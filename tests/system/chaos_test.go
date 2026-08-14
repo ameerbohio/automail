@@ -26,7 +26,7 @@
 // Primitives (encrypt, submit, SSE stream, docker control, /dev/shm) live in
 // harness.go, shared with the Goal T8 full-system driver. Brought up by
 // scripts/e2e/chaos.sh; excluded from every default `go test ./...`.
-package e2e
+package system
 
 import (
 	"net/http"

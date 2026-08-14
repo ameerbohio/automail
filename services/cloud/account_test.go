@@ -1,8 +1,8 @@
 package main
 
-// Phase 8 tests for open registration (POST /auth/register) and the account
-// job-history read (GET /jobs -> ListMyJobs). Like the Phase 5 stream tests,
-// these run the real sqlc query layer against the fake database/sql driver
+// Sender accounts: open registration (POST /auth/register) and the account
+// job-history read (GET /jobs -> ListMyJobs) -- roadmap Phase 8. Like the
+// stream tests, these run the real sqlc query layer against the fake driver
 // from dbfake_test.go -- no Postgres. Handlers are invoked directly with an
 // httptest recorder; the auth context ListMyJobs reads is set the same way
 // requireAuth would (authctx.WithSender).

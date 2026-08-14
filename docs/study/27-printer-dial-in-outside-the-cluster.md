@@ -1,6 +1,6 @@
 # The device that is not a workload: dialing into a cluster from outside it
 
-*Code: `infra/compose/k8s-printer.yml`, `scripts/k8s/e2e.sh`, `e2e/k8s_test.go`, `infra/k8s/overlays/k3d-local/kustomization.yaml`. Plan: `plans/16-kubernetes.md` §6. Acceptance: `make k8s-e2e`.*
+*Code: `infra/compose/k8s-printer.yml`, `scripts/k8s/e2e.sh`, `tests/system/k8s_test.go`, `infra/k8s/overlays/k3d-local/kustomization.yaml`. Plan: `plans/16-kubernetes.md` §6. Acceptance: `make k8s-e2e`.*
 
 ## What it is
 

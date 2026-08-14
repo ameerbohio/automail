@@ -29,7 +29,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "https://automail.local:9443"
 const edgeIP = process.env.EDGE_IP ?? "127.0.0.1";
 
 export default defineConfig({
-  testDir: "./e2e-k8s",
+  testDir: "./tests/ingress",
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
